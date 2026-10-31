@@ -13,3 +13,4 @@ main
 node_modules/
 build/
 .svelte-kit/
+*.log
