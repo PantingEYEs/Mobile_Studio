@@ -1,0 +1,57 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+PROJECT_DIR="$HOME/Mobile_Studio"
+BIN_PATH="$PROJECT_DIR/bin/server"
+PORT=8080
+
+is_running() {
+    (echo > /dev/tcp/127.0.0.1/$PORT) >/dev/null 2>&1
+}
+
+if [ "$1" = "stop" ]; then
+    echo "[m_s] 正在停止后台服务..."
+    pkill -f "$BIN_PATH" 2>/dev/null
+    echo "[m_s] 服务已停止。"
+    exit 0
+fi
+
+echo "=== Mobile Studio 启动器 ==="
+
+for cmd in go git; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "[m_s] 未检测到 $cmd，正在自动安装..."
+        pkg install -y "$cmd"
+    fi
+done
+
+mkdir -p "$PROJECT_DIR/bin"
+if [ ! -f "$BIN_PATH" ] || [ "$PROJECT_DIR/main.go" -nt "$BIN_PATH" ]; then
+    echo "[m_s] 检测到源码变动，正在编译..."
+    (cd "$PROJECT_DIR" && go build -o "$BIN_PATH" main.go)
+    if [ $? -ne 0 ]; then
+        echo "[m_s] 编译失败，请检查代码！"
+        exit 1
+    fi
+fi
+
+if is_running; then
+    echo "[m_s] 本地服务已处于运行状态 (端口 $PORT)。"
+else
+    echo "[m_s] 启动本地后台服务..."
+    nohup "$BIN_PATH" > "$PROJECT_DIR/server.log" 2>&1 &
+    
+    for i in {1..6}; do
+        if is_running; then
+            break
+        fi
+        sleep 0.5
+    done
+fi
+
+echo "[m_s] 正在调起 DuckDuckGo..."
+if ! am start -a android.intent.action.VIEW -d "http://127.0.0.1:$PORT" com.duckduckgo.mobile.android >/dev/null 2>&1; then
+    echo "[m_s] 未能唤起 DuckDuckGo，回退调用系统默认浏览器..."
+    termux-open-url "http://127.0.0.1:$PORT"
+fi
+
+echo "[m_s] 启动完成！提示：可输入 m_s stop 停止服务。"
