@@ -1,37 +1,71 @@
 <script>
   import { onMount } from 'svelte';
 
-  export let node = null; // 用于递归
+  export let node = null;
   export let selectedPath = null;
   export let isRoot = false;
 
-  let rootTree = null;
-  let isOpen = false; // 左侧面板默认关闭
-  let expandedDirs = {}; // 记录展开的目录路径，默认全空（全部折叠）
+  export let expandedDirs = {};
+  export let loadingDirs = {};
 
-  // 获取文件树数据
-  async function fetchTree() {
+  let rootNodes = [];
+  let isOpen = false;
+  let rootLoading = false;
+
+  // 常规意义上的忽略目录（在界面上标灰提醒，但完全支持点开查看）
+  const IGNORED_NAMES = new Set(['.git', 'node_modules', 'bin', 'dist', '.idea', '.vscode', '.svelte-kit']);
+
+  async function fetchChildren(dirPath) {
     try {
-      const res = await fetch('/api/fs/tree');
-      if (res.ok) {
-        rootTree = await res.json();
-      }
+      const res = await fetch('/api/fs/tree?path=' + encodeURIComponent(dirPath));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return data.children || [];
     } catch (e) {
-      console.error('Failed to load file tree:', e);
+      console.error('Failed to fetch layer:', dirPath, e);
+      return [];
     }
+  }
+
+  async function loadRoot() {
+    rootLoading = true;
+    rootNodes = await fetchChildren('');
+    rootLoading = false;
   }
 
   function togglePanel() {
     isOpen = !isOpen;
-    if (isOpen && !rootTree) {
-      fetchTree();
+    if (isOpen && rootNodes.length === 0) {
+      loadRoot();
     }
   }
 
-  function toggleDir(path, e) {
+  // 核心：单层惰性加载触发
+  async function toggleDir(dirNode, e) {
     e.stopPropagation();
-    expandedDirs[path] = !expandedDirs[path];
-    expandedDirs = { ...expandedDirs }; // 触发 Svelte 响应式更新
+    const p = dirNode.path;
+
+    // 如果已经展开，则收起
+    if (expandedDirs[p]) {
+      expandedDirs[p] = false;
+      expandedDirs = { ...expandedDirs };
+      return;
+    }
+
+    // 如果该目录尚未加载过子项，向后端请求仅仅这一层！
+    if (!dirNode.children) {
+      loadingDirs[p] = true;
+      loadingDirs = { ...loadingDirs };
+
+      const children = await fetchChildren(p);
+      dirNode.children = children;
+
+      loadingDirs[p] = false;
+      loadingDirs = { ...loadingDirs };
+    }
+
+    expandedDirs[p] = true;
+    expandedDirs = { ...expandedDirs };
   }
 
   function selectFile(path, e) {
@@ -40,18 +74,17 @@
   }
 
   onMount(() => {
-    if (isRoot) fetchTree();
+    if (isRoot) loadRoot();
   });
 </script>
 
 {#if isRoot}
-  <!-- 1. 左上角轻量悬浮触发按钮 -->
+  <!-- 悬浮触发按钮 -->
   <button class="panel-trigger-btn {isOpen ? 'active' : ''}" on:click={togglePanel}>
     <span class="icon">📁</span>
     <span class="text">文件</span>
   </button>
 
-  <!-- 2. 滑动抽屉与半透明遮罩 -->
   {#if isOpen}
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -60,59 +93,74 @@
       <div class="panel-header">
         <div class="header-title">
           <span class="proj-icon">📦</span>
-          <span class="proj-name">{rootTree ? rootTree.name : 'Mobile_Studio'}</span>
+          <span class="proj-name">Mobile_Studio</span>
         </div>
         <div class="header-actions">
-          <button class="icon-btn" on:click={fetchTree} title="刷新目录">🔄</button>
+          <button class="icon-btn" on:click={loadRoot} title="刷新根目录">🔄</button>
           <button class="icon-btn close" on:click={togglePanel}>✕</button>
         </div>
       </div>
 
       <div class="tree-container">
-        {#if rootTree && rootTree.children}
-          {#each rootTree.children as child}
+        {#if rootLoading}
+          <div class="loading-hint">正在读取根目录...</div>
+        {:else if rootNodes.length > 0}
+          {#each rootNodes as child}
             <svelte:self
               node={child}
               bind:selectedPath
               bind:expandedDirs
+              bind:loadingDirs
               isRoot={false}
-              on:selectFile
             />
           {/each}
         {:else}
-          <div class="loading-hint">正在读取文件树...</div>
+          <div class="loading-hint">目录为空</div>
         {/if}
       </div>
     </div>
   {/if}
 {:else if node}
-  <!-- 递归子节点渲染层 -->
   <div class="tree-node">
     {#if node.isDir}
-      <!-- 文件夹行 (默认完全折叠) -->
+      <!-- 文件夹节点 -->
       <!-- svelte-ignore a11y-click-events-have-key-events -->
       <!-- svelte-ignore a11y-no-static-element-interactions -->
-      <div class="node-row dir" on:click={(e) => toggleDir(node.path, e)}>
+      <div class="node-row dir {IGNORED_NAMES.has(node.name) ? 'ignored-dir' : ''}"
+           on:click={(e) => toggleDir(node, e)}>
         <span class="arrow">{expandedDirs[node.path] ? '▼' : '▶'}</span>
         <span class="folder-icon">{expandedDirs[node.path] ? '📂' : '📁'}</span>
         <span class="name">{node.name}</span>
+
+        {#if IGNORED_NAMES.has(node.name)}
+          <span class="ignore-tag">ignore</span>
+        {/if}
+
+        {#if loadingDirs[node.path]}
+          <span class="layer-loading">加载中...</span>
+        {/if}
       </div>
 
-      {#if expandedDirs[node.path] && node.children}
+      <!-- 子项容器 -->
+      {#if expandedDirs[node.path]}
         <div class="children-block">
-          {#each node.children as child}
-            <svelte:self
-              node={child}
-              bind:selectedPath
-              bind:expandedDirs
-              isRoot={false}
-              on:selectFile
-            />
-          {/each}
+          {#if node.children && node.children.length > 0}
+            {#each node.children as child}
+              <svelte:self
+                node={child}
+                bind:selectedPath
+                bind:expandedDirs
+                bind:loadingDirs
+                isRoot={false}
+              />
+            {/each}
+          {:else if !loadingDirs[node.path]}
+            <div class="empty-hint">(空文件夹)</div>
+          {/if}
         </div>
       {/if}
     {:else}
-      <!-- 普通文件行 (点击高亮反馈，暂不提供额外交互) -->
+      <!-- 普通文件 -->
       <!-- svelte-ignore a11y-click-events-have-key-events -->
       <!-- svelte-ignore a11y-no-static-element-interactions -->
       <div
@@ -137,7 +185,6 @@
 {/if}
 
 <style>
-  /* 悬浮唤起按钮 */
   .panel-trigger-btn {
     position: absolute;
     top: 14px;
@@ -171,14 +218,13 @@
     backdrop-filter: blur(2px);
   }
 
-  /* 抽屉侧边栏 */
   .file-panel {
     position: fixed;
     top: 0;
     left: 0;
     bottom: 0;
-    width: 260px;
-    max-width: 80vw;
+    width: 270px;
+    max-width: 82vw;
     background: rgba(11, 15, 25, 0.96);
     backdrop-filter: blur(16px);
     border-right: 1px solid rgba(51, 65, 85, 0.7);
@@ -238,7 +284,6 @@
     color: #f8fafc;
   }
 
-  /* 树形列表 */
   .tree-container {
     flex: 1;
     overflow-y: auto;
@@ -283,6 +328,33 @@
     color: #e2e8f0;
   }
 
+  .node-row.dir.ignored-dir {
+    color: #64748b;
+  }
+
+  .ignore-tag {
+    font-size: 8px;
+    color: #475569;
+    border: 1px solid #334155;
+    padding: 0 3px;
+    border-radius: 3px;
+    margin-left: 4px;
+  }
+
+  .layer-loading {
+    font-size: 9px;
+    color: #38bdf8;
+    margin-left: auto;
+    font-style: italic;
+  }
+
+  .empty-hint {
+    font-size: 10px;
+    color: #475569;
+    padding: 4px 8px;
+    font-style: italic;
+  }
+
   .arrow {
     font-size: 9px;
     color: #64748b;
@@ -299,7 +371,6 @@
     text-overflow: ellipsis;
   }
 
-  /* 普通文件选中态高亮反馈 */
   .node-row.file.selected {
     background: #1e293b;
     color: #38bdf8;
@@ -313,7 +384,6 @@
     margin-left: 12px;
   }
 
-  /* 小巧色彩文件类型圆点 */
   .file-icon {
     display: flex;
     align-items: center;

@@ -34,106 +34,91 @@ Branches      []string     `json:"branches"`
 Commits       []CommitNode `json:"commits"`
 }
 
-// 文件树节点结构
 type FileNode struct {
-Name     string      `json:"name"`
-Path     string      `json:"path"`
-IsDir    bool        `json:"isDir"`
-Children []*FileNode `json:"children,omitempty"`
+Name     string     `json:"name"`
+Path     string     `json:"path"`
+IsDir    bool       `json:"isDir"`
+Children []FileNode `json:"children,omitempty"`
 }
 
-// 安全黑名单：排除巨型依赖、版本库与编译临时产物
-var excludeDirs = map[string]bool{
-".git":         true,
-"node_modules": true,
-"bin":          true,
-"dist":         true,
-".idea":        true,
-".vscode":      true,
-".svelte-kit":  true,
+// 单层精准加载接口：每次只扫描直属下一层，彻底阻断递归膨胀
+func handleFileTree(w http.ResponseWriter, r *http.Request) {
+w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+reqPath := r.URL.Query().Get("path")
+reqPath = strings.TrimPrefix(reqPath, "/")
+
+// 路径穿越安全防护 (禁止 ../ 逃逸项目根目录)
+cleaned := filepath.Clean(filepath.FromSlash(reqPath))
+if strings.HasPrefix(cleaned, "..") || filepath.IsAbs(cleaned) {
+http.Error(w, `{"error":"Invalid path traversal"}`, http.StatusBadRequest)
+return
 }
 
-var excludeFiles = map[string]bool{
-".DS_Store": true,
+fullPath := "."
+if cleaned != "." && cleaned != "" {
+fullPath = cleaned
 }
 
-func buildFileTree(rootDir string, relPath string) (*FileNode, error) {
-fullPath := filepath.Join(rootDir, relPath)
 info, err := os.Stat(fullPath)
 if err != nil {
-return nil, err
-}
-
-name := filepath.Base(relPath)
-if relPath == "" {
-name = "Mobile_Studio"
+http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusNotFound)
+return
 }
 
 if !info.IsDir() {
-return &FileNode{
-Name:  name,
-Path:  filepath.ToSlash(relPath),
-IsDir: false,
-}, nil
+http.Error(w, `{"error":"Path is not a directory"}`, http.StatusBadRequest)
+return
 }
 
 entries, err := os.ReadDir(fullPath)
 if err != nil {
-return nil, err
+http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
+return
 }
 
-var dirNodes []*FileNode
-var fileNodes []*FileNode
+var dirNodes []FileNode
+var fileNodes []FileNode
 
 for _, entry := range entries {
 eName := entry.Name()
+if eName == ".DS_Store" {
+continue
+}
+
+childRel := eName
+if cleaned != "." && cleaned != "" {
+childRel = filepath.Join(cleaned, eName)
+}
+webPath := filepath.ToSlash(childRel)
+
 if entry.IsDir() {
-if excludeDirs[eName] {
-continue
-}
-childRel := filepath.Join(relPath, eName)
-childNode, err := buildFileTree(rootDir, childRel)
-if err == nil && childNode != nil {
-dirNodes = append(dirNodes, childNode)
-}
-} else {
-if excludeFiles[eName] {
-continue
-}
-childRel := filepath.Join(relPath, eName)
-fileNodes = append(fileNodes, &FileNode{
+dirNodes = append(dirNodes, FileNode{
 Name:  eName,
-Path:  filepath.ToSlash(childRel),
+Path:  webPath,
+IsDir: true,
+})
+} else {
+fileNodes = append(fileNodes, FileNode{
+Name:  eName,
+Path:  webPath,
 IsDir: false,
 })
 }
 }
 
-// 文件夹在前、普通文件在后，分别按字母排序
-sort.Slice(dirNodes, func(i, j int) bool {
-return dirNodes[i].Name < dirNodes[j].Name
-})
-sort.Slice(fileNodes, func(i, j int) bool {
-return fileNodes[i].Name < fileNodes[j].Name
-})
+sort.Slice(dirNodes, func(i, j int) bool { return dirNodes[i].Name < dirNodes[j].Name })
+sort.Slice(fileNodes, func(i, j int) bool { return fileNodes[i].Name < fileNodes[j].Name })
 
-allChildren := append(dirNodes, fileNodes...)
-return &FileNode{
-Name:     name,
-Path:     filepath.ToSlash(relPath),
-IsDir:    true,
-Children: allChildren,
-}, nil
+resp := struct {
+Path     string     `json:"path"`
+Children []FileNode `json:"children"`
+}{
+Path:     filepath.ToSlash(reqPath),
+Children: append(dirNodes, fileNodes...),
 }
 
-func handleFileTree(w http.ResponseWriter, r *http.Request) {
-w.Header().Set("Content-Type", "application/json; charset=utf-8")
-tree, err := buildFileTree(".", "")
-if err != nil {
-http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
-return
-}
-json.NewEncoder(w).Encode(tree)
+json.NewEncoder(w).Encode(resp)
 }
 
 func handleGitGraph(w http.ResponseWriter, r *http.Request) {
