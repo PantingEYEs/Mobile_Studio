@@ -19,7 +19,7 @@
   let offsetY = 80;
 
   let isDragging = false;
-  let hasMoved = false; // 标记本次手势是否发生了真实移动
+  let hasMoved = false;
   let startX = 0, startY = 0;
   let startOffsetX = 0, startOffsetY = 0;
 
@@ -66,11 +66,16 @@
     refreshLayout();
   }
 
-  // 严格校验：若刚才发生了滑动平移，坚决不触发节点点击选中！
   function handleSelectNode(e) {
     if (hasMoved) return;
     const node = e.detail;
     selectedHash = selectedHash === node.commit.hash ? null : node.commit.hash;
+  }
+
+  // 点击空白处取消激活：仅在未发生滑动时生效
+  function onViewportClick(e) {
+    if (hasMoved) return;
+    selectedHash = null;
   }
 
   function resetView() {
@@ -114,7 +119,6 @@
       const dx = cx - startX;
       const dy = cy - startY;
 
-      // 位移超过 6px 判定为滑动操作
       if (Math.hypot(dx, dy) > 6) {
         hasMoved = true;
       }
@@ -129,10 +133,10 @@
     if (!e.touches || e.touches.length === 0) {
       isDragging = false;
       isPinching = false;
-      // 延时重置 hasMoved，避免 click 事件冒泡拾取到过期的未移动标志
+      // 延时重置移动标志位，确保移动端 click 事件捕获到真实滑动意图
       setTimeout(() => {
         hasMoved = false;
-      }, 50);
+      }, 250);
     }
   }
 
@@ -144,7 +148,10 @@
   onMount(() => loadData());
 </script>
 
+<!-- svelte-ignore a11y-click-events-have-key-events -->
+<!-- svelte-ignore a11y-no-static-element-interactions -->
 <div class="viewport"
+     on:click={onViewportClick}
      on:mousedown={onTouchStart} on:mousemove={onTouchMove} on:mouseup={onTouchEnd}
      on:touchstart={onTouchStart} on:touchmove={onTouchMove} on:touchend={onTouchEnd}
      on:wheel={onWheel}>
