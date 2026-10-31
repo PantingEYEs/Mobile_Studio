@@ -7,11 +7,9 @@
   let loading = true;
   let error = null;
 
-  // 选中节点状态
   let selectedHash = null;
   let copiedHash = false;
 
-  // 平移与缩放 (双指捏合 + 单指平移)
   let zoom = 1.0;
   let offsetX = 0;
   let offsetY = 80;
@@ -22,13 +20,13 @@
   let startOffsetX = 0;
   let startOffsetY = 0;
 
-  // 双指缩放专用状态
   let isPinching = false;
   let initialPinchDistance = 0;
   let initialZoom = 1.0;
 
-  const ROW_GAP = 50;
-  const LANE_SPREAD = 22;
+  const ROW_GAP = 52;       // 适当微调纵向间距，给两层标签充足呼吸空间
+  const LANE_SPREAD = 22;   // 紧凑横向间距
+  const NODE_RADIUS = 5.5;
 
   const SPINE_COLOR = '#38bdf8';
   const BRANCH_COLORS = [
@@ -42,7 +40,6 @@
   let renderedNodes = [];
   let renderedEdges = [];
 
-  // 计算双指之间的几何直线距离
   function getDistance(touches) {
     const dx = touches[0].clientX - touches[1].clientX;
     const dy = touches[0].clientY - touches[1].clientY;
@@ -130,6 +127,7 @@
 
       const x = laneIndex * LANE_SPREAD;
       const y = index * ROW_GAP;
+      const isLeft = laneIndex < 0;
       nodeCoords.set(c.hash, { x, y, color, isSpine });
 
       return {
@@ -137,7 +135,8 @@
         x,
         y,
         color,
-        isSpine
+        isSpine,
+        isLeft
       };
     });
 
@@ -219,16 +218,13 @@
     offsetY = 80;
   }
 
-  // === 触控手势系统：单指平移 + 双指捏合缩放 ===
   function onTouchStart(e) {
     if (e.touches && e.touches.length === 2) {
-      // 激活双指缩放
       isPinching = true;
       isDragging = false;
       initialPinchDistance = getDistance(e.touches);
       initialZoom = zoom;
     } else if (e.touches && e.touches.length === 1) {
-      // 单指平移
       isPinching = false;
       isDragging = true;
       startX = e.touches[0].clientX;
@@ -236,7 +232,6 @@
       startOffsetX = offsetX;
       startOffsetY = offsetY;
     } else if (!e.touches) {
-      // 鼠标拖拽
       isDragging = true;
       startX = e.clientX;
       startY = e.clientY;
@@ -250,7 +245,6 @@
       const currentDistance = getDistance(e.touches);
       if (initialPinchDistance > 0) {
         const factor = currentDistance / initialPinchDistance;
-        // 严格限制缩放区间：0.5x ~ 1.8x
         zoom = Math.min(1.8, Math.max(0.5, +(initialZoom * factor).toFixed(2)));
       }
     } else if (isDragging) {
@@ -272,7 +266,6 @@
     }
   }
 
-  // 鼠标滚轮缩放 (兼容三星 DeX 桌面模式)
   function onWheel(e) {
     e.preventDefault();
     const delta = -e.deltaY * 0.001;
@@ -293,7 +286,6 @@
      on:touchend={onTouchEnd}
      on:wheel={onWheel}>
 
-  <!-- 顶部精简控制卡片：删除冗余的加减按钮，仅保留主轴与一键居中 -->
   <div class="control-panel" on:mousedown|stopPropagation on:touchstart|stopPropagation>
     <div class="spine-selector-wrap">
       <span class="label">主轴:</span>
@@ -348,7 +340,7 @@
             {/if}
           {/each}
 
-          <!-- 2. 节点与交互浮动卡片 -->
+          <!-- 2. 节点与纵向层叠标签 -->
           {#each renderedNodes as node (node.commit.hash)}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -356,14 +348,14 @@
                transform="translate({node.x}, {node.y})"
                on:click={() => selectCommit(node)}>
 
-              <!-- 外发光环 -->
+              <!-- 外层光晕环 -->
               <circle
                 r={selectedHash === node.commit.hash ? 14 : (node.isSpine ? 9 : 7)}
                 fill={node.color}
                 opacity={selectedHash === node.commit.hash ? "0.4" : "0.15"}
               />
 
-              <!-- 彩色圆点 (选中时放大) -->
+              <!-- 彩色圆点 -->
               <circle
                 r={selectedHash === node.commit.hash ? 8.5 : 5}
                 fill={node.color}
@@ -371,7 +363,7 @@
                 stroke-width="2"
               />
 
-              <!-- 选中时的纯白内芯 -->
+              <!-- 选中时白色内芯 -->
               {#if selectedHash === node.commit.hash}
                 <circle
                   r="3.2"
@@ -379,10 +371,17 @@
                 />
               {/if}
 
-              <!-- 侧边标签 -->
-              <foreignObject x={node.x >= 0 ? 12 : -180} y="-16" width="220" height="70" class="label-box">
+              <!-- 标签与信息层叠容器 -->
+              <foreignObject
+                x={node.isLeft ? -222 : 12}
+                y="-14"
+                width="210"
+                height="80"
+                class="label-box"
+              >
                 {#if selectedHash === node.commit.hash}
-                  <div class="popover-card" on:click|stopPropagation>
+                  <!-- 选中时的详情呼出卡片 -->
+                  <div class="popover-card {node.isLeft ? 'on-left' : 'on-right'}" on:click|stopPropagation>
                     <div class="popover-title">{node.commit.message}</div>
                     <div class="popover-meta">
                       <span>{node.commit.author} · {node.commit.date}</span>
@@ -393,13 +392,18 @@
                     </div>
                   </div>
                 {:else}
-                  <div class="silent-label">
+                  <!-- 默认静默状态：上层7位哈希 + 下层紧贴分支标签 (绝不遮挡) -->
+                  <div class="stacked-label {node.isLeft ? 'align-right' : 'align-left'}">
+                    <!-- 1. 顶层：7位短哈希始终可见 -->
+                    <span class="faint-hash">{node.commit.shortHash}</span>
+
+                    <!-- 2. 底层：紧贴在哈希下方的小巧分支徽标 -->
                     {#if node.commit.refs && node.commit.refs.length > 0}
-                      {#each node.commit.refs as ref}
-                        <span class="ref-pill {ref === selectedSpine ? 'spine-pill' : ''}">{ref}</span>
-                      {/each}
-                    {:else}
-                      <span class="faint-hash">{node.commit.shortHash}</span>
+                      <div class="pills-strip {node.isLeft ? 'justify-right' : 'justify-left'}">
+                        {#each node.commit.refs as ref}
+                          <span class="ref-pill {ref === selectedSpine ? 'spine-pill' : ''}">{ref}</span>
+                        {/each}
+                      </div>
                     {/if}
                   </div>
                 {/if}
@@ -437,7 +441,6 @@
     cursor: grabbing;
   }
 
-  /* 极致紧凑的顶部浮动卡片 */
   .control-panel {
     position: absolute;
     top: 12px;
@@ -512,7 +515,6 @@
     color: #0f172a;
   }
 
-  /* 画布居中与动画 */
   .canvas-transform {
     position: absolute;
     left: 50%;
@@ -545,42 +547,72 @@
     pointer-events: auto;
   }
 
-  .silent-label {
+  /* 纵向层叠核心容器：哈希在上，徽标在下紧贴 */
+  .stacked-label {
     display: flex;
-    align-items: center;
-    gap: 4px;
-    line-height: 32px;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+  }
+
+  .stacked-label.align-left {
+    align-items: flex-start;
+  }
+
+  .stacked-label.align-right {
+    align-items: flex-end;
   }
 
   .faint-hash {
     font-family: monospace;
     font-size: 10px;
-    color: #64748b;
-    opacity: 0.35;
+    color: #94a3b8;
+    opacity: 0.45;
     letter-spacing: 0.5px;
+    line-height: 12px;
   }
 
+  .pills-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+
+  .pills-strip.justify-left {
+    justify-content: flex-start;
+  }
+
+  .pills-strip.justify-right {
+    justify-content: flex-end;
+  }
+
+  /* 紧凑精致的小号分支徽标 */
   .ref-pill {
     background: #0f172a;
     color: #38bdf8;
     border: 1px solid #0284c7;
-    font-size: 9px;
+    font-size: 8.5px;
     font-weight: 700;
-    padding: 1px 5px;
-    border-radius: 4px;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-    max-width: 120px;
+    padding: 0px 4px;
+    height: 14px;
+    line-height: 13px;
+    border-radius: 3px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+    max-width: 110px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    display: inline-block;
+    box-sizing: border-box;
   }
 
   .ref-pill.spine-pill {
     background: #0284c7;
     color: #ffffff;
-    box-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
+    box-shadow: 0 0 6px rgba(56, 189, 248, 0.5);
   }
 
+  /* 选中详情卡片 */
   .popover-card {
     background: #0f172a;
     border: 1px solid #38bdf8;
@@ -592,6 +624,14 @@
     gap: 2px;
     max-width: 190px;
     z-index: 50;
+  }
+
+  .popover-card.on-right {
+    margin-right: auto;
+  }
+
+  .popover-card.on-left {
+    margin-left: auto;
   }
 
   .popover-title {
