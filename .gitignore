@@ -1,0 +1,15 @@
+# Binaries
+bin/
+*.exe
+*.out
+main
+
+# OS & IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Node / Svelte (for future steps)
+node_modules/
+build/
+.svelte-kit/
