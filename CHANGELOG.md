@@ -6,6 +6,16 @@
 ## [0.0.1-dev] - 2026-11-01
 
 ### Added
+- 实现轻量级抽屉式项目文件树面板（FilePanel.svelte）：
+  - 后端提供安全过滤与防路径穿越的 /api/fs/tree 目录接口。
+  - 采用工业级单层惰性加载（On-Demand Lazy Loading）架构，支持查看全量真实文件（包括 .git 与 node_modules）而绝无内存溢出风险。
+  - 默认状态完全折叠，支持多级文件夹逐级手动展开与收起。
+  - 文件项支持点击高亮选中视觉反馈，配备彩色类型标识。
+- 前端核心架构重构（解耦 App.svelte）：
+  - 将数学拓扑排版算法抽离为纯 JS 模块 src/lib/graphLayout.js。
+  - 将顶部悬浮控制栏解耦为 ControlPanel.svelte。
+  - 将提交节点与交互气泡解耦为 CommitNode.svelte。
+  - App.svelte 代码量缩减至原先不足五分之一，大幅提升可维护性。
 - 实现 Android Studio / GitKraken 质感的 Git 分支拓扑可视化引擎：
   - 后端在 main.go 中提供 /api/git/graph 接口，基于零截断协议输出结构化 DAG 关系与分支列表。
   - 支持在 UI 中自由指定任意现存分支为主轴，基于 First-Parent 递归溯源强制拉直居中垂线。
