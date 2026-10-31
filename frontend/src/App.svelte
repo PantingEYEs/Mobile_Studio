@@ -7,44 +7,54 @@
   let loading = true;
   let error = null;
 
-  // 选中节点状态 (点击交互)
+  // 选中节点状态
   let selectedHash = null;
   let copiedHash = false;
 
-  // 平移与缩放 (主轴锚定于正中)
+  // 平移与缩放 (双指捏合 + 单指平移)
   let zoom = 1.0;
   let offsetX = 0;
   let offsetY = 80;
+
   let isDragging = false;
   let startX = 0;
   let startY = 0;
   let startOffsetX = 0;
   let startOffsetY = 0;
 
-  // 极限紧凑几何参数
-  const ROW_GAP = 50;       // 纵向提交间距
-  const LANE_SPREAD = 22;   // 紧凑横向间距 (仅22px，紧贴主轴)
+  // 双指缩放专用状态
+  let isPinching = false;
+  let initialPinchDistance = 0;
+  let initialZoom = 1.0;
 
-  const SPINE_COLOR = '#38bdf8'; // 主干：纯澈冰蓝
+  const ROW_GAP = 50;
+  const LANE_SPREAD = 22;
+
+  const SPINE_COLOR = '#38bdf8';
   const BRANCH_COLORS = [
-    '#34d399', // 薄荷绿
-    '#f472b6', // 珊瑚粉
-    '#fbbf24', // 琥珀黄
-    '#a78bfa', // 紫罗兰
-    '#fb7185'  // 玫瑰红
+    '#34d399',
+    '#f472b6',
+    '#fbbf24',
+    '#a78bfa',
+    '#fb7185'
   ];
 
   let renderedNodes = [];
   let renderedEdges = [];
 
-  // 递归树形泳道定侧算法：同分支同侧，子分支在同侧向外递归
+  // 计算双指之间的几何直线距离
+  function getDistance(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  }
+
   function layoutTopology(commitList, spineBranchName) {
     if (!commitList || commitList.length === 0) return;
 
     const commitMap = new Map();
     commitList.forEach(c => commitMap.set(c.hash, c));
 
-    // 1. 定位主轴 Head 并沿 first-parent 溯源锁定主干
     let spineHeadHash = null;
     for (const c of commitList) {
       if (c.refs && c.refs.some(r => r === spineBranchName || r.endsWith('/' + spineBranchName) || r.includes('-> ' + spineBranchName))) {
@@ -66,7 +76,6 @@
       }
     }
 
-    // 2. 识别分支链条 (Chain)：同一分支的所有 Commit 共享相同的分支根
     const chainRootMap = new Map();
     commitList.forEach(c => {
       if (spineCommitHashes.has(c.hash)) return;
@@ -85,7 +94,6 @@
       chainRootMap.set(c.hash, walk);
     });
 
-    // 3. 为每个独立分支链分配稳定的侧翼泳道与色彩（绝不跨侧横跳）
     const chainLaneMap = new Map();
     let nextRightLane = 1;
     let nextLeftLane = -1;
@@ -95,7 +103,6 @@
       if (spineCommitHashes.has(c.hash)) return;
       const root = chainRootMap.get(c.hash) || c.hash;
       if (!chainLaneMap.has(root)) {
-        // 奇偶轮替主轴两侧，后续同分支严格锁定在同侧
         let lane;
         if (Math.abs(nextLeftLane) <= nextRightLane) {
           lane = nextLeftLane--;
@@ -108,7 +115,6 @@
       }
     });
 
-    // 4. 计算每个提交节点的物理坐标 (X, Y)
     const nodeCoords = new Map();
     renderedNodes = commitList.map((c, index) => {
       const isSpine = spineCommitHashes.has(c.hash);
@@ -135,7 +141,6 @@
       };
     });
 
-    // 5. 绘制真实 Git 边（从父节点圆心平滑连接到子节点圆心）
     renderedEdges = [];
     commitList.forEach(c => {
       const from = nodeCoords.get(c.hash);
@@ -193,10 +198,9 @@
     layoutTopology(commits, selectedSpine);
   }
 
-  // 点击选择节点交互
   function selectCommit(node) {
     if (selectedHash === node.commit.hash) {
-      selectedHash = null; // 再次点击取消
+      selectedHash = null;
     } else {
       selectedHash = node.commit.hash;
     }
@@ -209,37 +213,70 @@
     setTimeout(() => (copiedHash = false), 1500);
   }
 
-  function zoomIn() {
-    zoom = Math.min(1.8, +(zoom + 0.15).toFixed(2));
-  }
-  function zoomOut() {
-    zoom = Math.max(0.5, +(zoom - 0.15).toFixed(2));
-  }
   function resetView() {
     zoom = 1.0;
     offsetX = 0;
     offsetY = 80;
   }
 
-  // 平移拖拽
+  // === 触控手势系统：单指平移 + 双指捏合缩放 ===
   function onTouchStart(e) {
-    isDragging = true;
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    startX = clientX;
-    startY = clientY;
-    startOffsetX = offsetX;
-    startOffsetY = offsetY;
+    if (e.touches && e.touches.length === 2) {
+      // 激活双指缩放
+      isPinching = true;
+      isDragging = false;
+      initialPinchDistance = getDistance(e.touches);
+      initialZoom = zoom;
+    } else if (e.touches && e.touches.length === 1) {
+      // 单指平移
+      isPinching = false;
+      isDragging = true;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      startOffsetX = offsetX;
+      startOffsetY = offsetY;
+    } else if (!e.touches) {
+      // 鼠标拖拽
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      startOffsetX = offsetX;
+      startOffsetY = offsetY;
+    }
   }
+
   function onTouchMove(e) {
-    if (!isDragging) return;
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    offsetX = startOffsetX + (clientX - startX);
-    offsetY = startOffsetY + (clientY - startY);
+    if (isPinching && e.touches && e.touches.length === 2) {
+      const currentDistance = getDistance(e.touches);
+      if (initialPinchDistance > 0) {
+        const factor = currentDistance / initialPinchDistance;
+        // 严格限制缩放区间：0.5x ~ 1.8x
+        zoom = Math.min(1.8, Math.max(0.5, +(initialZoom * factor).toFixed(2)));
+      }
+    } else if (isDragging) {
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      offsetX = startOffsetX + (clientX - startX);
+      offsetY = startOffsetY + (clientY - startY);
+    }
   }
-  function onTouchEnd() {
-    isDragging = false;
+
+  function onTouchEnd(e) {
+    if (e.touches && e.touches.length < 2) {
+      isPinching = false;
+      initialPinchDistance = 0;
+    }
+    if (!e.touches || e.touches.length === 0) {
+      isDragging = false;
+      isPinching = false;
+    }
+  }
+
+  // 鼠标滚轮缩放 (兼容三星 DeX 桌面模式)
+  function onWheel(e) {
+    e.preventDefault();
+    const delta = -e.deltaY * 0.001;
+    zoom = Math.min(1.8, Math.max(0.5, +(zoom + delta).toFixed(2)));
   }
 
   onMount(() => {
@@ -253,9 +290,10 @@
      on:mouseup={onTouchEnd}
      on:touchstart={onTouchStart}
      on:touchmove={onTouchMove}
-     on:touchend={onTouchEnd}>
+     on:touchend={onTouchEnd}
+     on:wheel={onWheel}>
 
-  <!-- 顶部轻量浮动控制栏 -->
+  <!-- 顶部精简控制卡片：删除冗余的加减按钮，仅保留主轴与一键居中 -->
   <div class="control-panel" on:mousedown|stopPropagation on:touchstart|stopPropagation>
     <div class="spine-selector-wrap">
       <span class="label">主轴:</span>
@@ -266,10 +304,8 @@
       </select>
     </div>
 
-    <div class="zoom-tools">
-      <button class="btn" on:click={zoomOut}>-</button>
+    <div class="status-tools">
       <span class="zoom-value">{Math.round(zoom * 100)}%</span>
-      <button class="btn" on:click={zoomIn}>+</button>
       <button class="btn reset" on:click={resetView}>居中</button>
     </div>
   </div>
@@ -279,11 +315,9 @@
   {:else if error}
     <div class="status-msg error">{error}</div>
   {:else}
-    <!-- 拓扑画布：居中展示，纯净视觉主角 -->
     <div class="canvas-transform"
          style="transform: translate(calc(-50% + {offsetX}px), {offsetY}px) scale({zoom});">
 
-      <!-- 居中垂线参考光效 -->
       <div class="spine-center-guide"></div>
 
       <svg class="graph-svg" width="900" height={commits.length * ROW_GAP + 160}>
@@ -314,7 +348,7 @@
             {/if}
           {/each}
 
-          <!-- 2. 节点与极简标签 -->
+          <!-- 2. 节点与交互浮动卡片 -->
           {#each renderedNodes as node (node.commit.hash)}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -322,24 +356,22 @@
                transform="translate({node.x}, {node.y})"
                on:click={() => selectCommit(node)}>
 
-              <!-- 外层光晕环 -->
+              <!-- 外发光环 -->
               <circle
                 r={selectedHash === node.commit.hash ? 14 : (node.isSpine ? 9 : 7)}
                 fill={node.color}
                 opacity={selectedHash === node.commit.hash ? "0.4" : "0.15"}
-                class="glow-ring"
               />
 
-              <!-- 核心彩色节点 (选中时变大) -->
+              <!-- 彩色圆点 (选中时放大) -->
               <circle
                 r={selectedHash === node.commit.hash ? 8.5 : 5}
                 fill={node.color}
                 stroke="#060911"
                 stroke-width="2"
-                class="core-dot"
               />
 
-              <!-- 点击选中的专属视觉反馈：中心点亮白色小圆点 -->
+              <!-- 选中时的纯白内芯 -->
               {#if selectedHash === node.commit.hash}
                 <circle
                   r="3.2"
@@ -347,10 +379,9 @@
                 />
               {/if}
 
-              <!-- 极简标签：未点击时只显示分支头徽标或半透明7位Hash；点击后就地弹出详情卡片 -->
+              <!-- 侧边标签 -->
               <foreignObject x={node.x >= 0 ? 12 : -180} y="-16" width="220" height="70" class="label-box">
                 {#if selectedHash === node.commit.hash}
-                  <!-- 选中时的详情呼出气泡 -->
                   <div class="popover-card" on:click|stopPropagation>
                     <div class="popover-title">{node.commit.message}</div>
                     <div class="popover-meta">
@@ -362,7 +393,6 @@
                     </div>
                   </div>
                 {:else}
-                  <!-- 未选中时的默认静默显示：只展示标签/分支头或淡雅Hash -->
                   <div class="silent-label">
                     {#if node.commit.refs && node.commit.refs.length > 0}
                       {#each node.commit.refs as ref}
@@ -407,31 +437,29 @@
     cursor: grabbing;
   }
 
-  /* 顶部浮动控制卡片 */
+  /* 极致紧凑的顶部浮动卡片 */
   .control-panel {
     position: absolute;
     top: 12px;
     left: 50%;
     transform: translateX(-50%);
-    max-width: 92vw;
+    max-width: 90vw;
     background: rgba(15, 23, 42, 0.9);
     backdrop-filter: blur(14px);
     border: 1px solid rgba(51, 65, 85, 0.8);
-    padding: 5px 12px;
-    border-radius: 24px;
+    padding: 4px 10px;
+    border-radius: 20px;
     display: flex;
     align-items: center;
     gap: 8px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
     z-index: 100;
-    box-sizing: border-box;
   }
 
   .spine-selector-wrap {
     display: flex;
     align-items: center;
     gap: 4px;
-    flex-shrink: 1;
     min-width: 0;
   }
 
@@ -454,37 +482,10 @@
     text-overflow: ellipsis;
   }
 
-  .zoom-tools {
+  .status-tools {
     display: flex;
     align-items: center;
-    gap: 4px;
-  }
-
-  .btn {
-    background: #1e293b;
-    color: #e2e8f0;
-    border: 1px solid #334155;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 13px;
-    font-weight: bold;
-    cursor: pointer;
-  }
-
-  .btn.reset {
-    width: auto;
-    border-radius: 10px;
-    padding: 0 6px;
-    font-size: 10px;
-  }
-
-  .btn:active {
-    background: #38bdf8;
-    color: #0f172a;
+    gap: 6px;
   }
 
   .zoom-value {
@@ -495,7 +496,23 @@
     font-family: monospace;
   }
 
-  /* 居中画布容器 */
+  .btn.reset {
+    background: #1e293b;
+    color: #e2e8f0;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+
+  .btn.reset:active {
+    background: #38bdf8;
+    color: #0f172a;
+  }
+
+  /* 画布居中与动画 */
   .canvas-transform {
     position: absolute;
     left: 50%;
@@ -521,10 +538,6 @@
 
   .node-group {
     cursor: pointer;
-  }
-
-  .core-dot {
-    transition: r 0.15s ease-out;
   }
 
   .label-box {
@@ -568,7 +581,6 @@
     box-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
   }
 
-  /* 选中时的浮动卡片 */
   .popover-card {
     background: #0f172a;
     border: 1px solid #38bdf8;
