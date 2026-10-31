@@ -1,118 +1,186 @@
 <script>
   import { onMount } from 'svelte';
 
+  let branches = [];
+  let selectedSpine = '';
   let commits = [];
   let loading = true;
   let error = null;
-  let selectedCommit = null;
+
+  // 选中节点状态 (点击交互)
+  let selectedHash = null;
   let copiedHash = false;
 
-  // 经典多色霓虹调色盘 (GitKraken / Android Studio 风格)
-  const PALETTE = [
-    '#38bdf8', // 天蓝
+  // 平移与缩放 (主轴锚定于正中)
+  let zoom = 1.0;
+  let offsetX = 0;
+  let offsetY = 80;
+  let isDragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startOffsetX = 0;
+  let startOffsetY = 0;
+
+  // 极限紧凑几何参数
+  const ROW_GAP = 50;       // 纵向提交间距
+  const LANE_SPREAD = 22;   // 紧凑横向间距 (仅22px，紧贴主轴)
+
+  const SPINE_COLOR = '#38bdf8'; // 主干：纯澈冰蓝
+  const BRANCH_COLORS = [
     '#34d399', // 薄荷绿
     '#f472b6', // 珊瑚粉
     '#fbbf24', // 琥珀黄
     '#a78bfa', // 紫罗兰
-    '#f87171', // 浅绯红
-    '#4ade80'  // 翠绿
+    '#fb7185'  // 玫瑰红
   ];
 
-  const ROW_HEIGHT = 44;
-  const LANE_WIDTH = 22;
-  const NODE_RADIUS = 5;
+  let renderedNodes = [];
+  let renderedEdges = [];
 
-  let graphRows = [];
-  let maxLanes = 1;
+  // 递归树形泳道定侧算法：同分支同侧，子分支在同侧向外递归
+  function layoutTopology(commitList, spineBranchName) {
+    if (!commitList || commitList.length === 0) return;
 
-  function getColor(laneIndex) {
-    return PALETTE[laneIndex % PALETTE.length];
-  }
+    const commitMap = new Map();
+    commitList.forEach(c => commitMap.set(c.hash, c));
 
-  // 核心数学模型：线性扫描泳道分配与贝塞尔路由算法
-  function computeGraph(commitList) {
-    const lanes = [];
-    const rows = [];
-    let peakLanes = 1;
-
-    for (let r = 0; r < commitList.length; r++) {
-      const c = commitList[r];
-      const h = c.hash;
-      const parents = c.parents || [];
-
-      // 1. 分配或继承列 (Lane)
-      let col = lanes.indexOf(h);
-      if (col === -1) {
-        col = lanes.indexOf(null);
-        if (col === -1) {
-          col = lanes.length;
-          lanes.push(h);
-        } else {
-          lanes[col] = h;
-        }
+    // 1. 定位主轴 Head 并沿 first-parent 溯源锁定主干
+    let spineHeadHash = null;
+    for (const c of commitList) {
+      if (c.refs && c.refs.some(r => r === spineBranchName || r.endsWith('/' + spineBranchName) || r.includes('-> ' + spineBranchName))) {
+        spineHeadHash = c.hash;
+        break;
       }
+    }
+    if (!spineHeadHash && commitList.length > 0) spineHeadHash = commitList[0].hash;
 
-      if (lanes.length > peakLanes) peakLanes = lanes.length;
-
-      // 2. 统计纵向直通穿透线 (Passing Lanes)
-      const passing = [];
-      for (let l = 0; l < lanes.length; l++) {
-        if (l !== col && lanes[l] !== null) {
-          passing.push(l);
-        }
-      }
-
-      // 3. 计算指向父节点的路由连接 (Routes)
-      const routes = [];
-      if (parents.length > 0) {
-        // 主父节点沿用本列
-        lanes[col] = parents[0];
-        routes.push({ fromCol: col, toCol: col, toParent: parents[0] });
-
-        // 合并引入的次级父节点 (Merge 分叉/合并)
-        for (let pIdx = 1; pIdx < parents.length; pIdx++) {
-          const pHash = parents[pIdx];
-          let pCol = lanes.indexOf(pHash);
-          if (pCol === -1) {
-            pCol = lanes.indexOf(null);
-            if (pCol === -1) {
-              pCol = lanes.length;
-              lanes.push(pHash);
-            } else {
-              lanes[pCol] = pHash;
-            }
-          }
-          routes.push({ fromCol: col, toCol: pCol, toParent: pHash });
-        }
+    const spineCommitHashes = new Set();
+    let cur = spineHeadHash;
+    while (cur && commitMap.has(cur)) {
+      spineCommitHashes.add(cur);
+      const node = commitMap.get(cur);
+      if (node.parents && node.parents.length > 0) {
+        cur = node.parents[0];
       } else {
-        lanes[col] = null;
+        break;
       }
-
-      rows.push({
-        commit: c,
-        row: r,
-        col: col,
-        color: getColor(col),
-        passing: passing,
-        routes: routes
-      });
     }
 
-    maxLanes = Math.max(peakLanes, 1);
-    return rows;
+    // 2. 识别分支链条 (Chain)：同一分支的所有 Commit 共享相同的分支根
+    const chainRootMap = new Map();
+    commitList.forEach(c => {
+      if (spineCommitHashes.has(c.hash)) return;
+      let walk = c.hash;
+      while (walk && !spineCommitHashes.has(walk) && commitMap.has(walk)) {
+        const parents = commitMap.get(walk).parents;
+        if (parents && parents.length > 0) {
+          const nextP = parents[0];
+          if (!spineCommitHashes.has(nextP)) {
+            walk = nextP;
+            continue;
+          }
+        }
+        break;
+      }
+      chainRootMap.set(c.hash, walk);
+    });
+
+    // 3. 为每个独立分支链分配稳定的侧翼泳道与色彩（绝不跨侧横跳）
+    const chainLaneMap = new Map();
+    let nextRightLane = 1;
+    let nextLeftLane = -1;
+    let colorIdx = 0;
+
+    commitList.forEach(c => {
+      if (spineCommitHashes.has(c.hash)) return;
+      const root = chainRootMap.get(c.hash) || c.hash;
+      if (!chainLaneMap.has(root)) {
+        // 奇偶轮替主轴两侧，后续同分支严格锁定在同侧
+        let lane;
+        if (Math.abs(nextLeftLane) <= nextRightLane) {
+          lane = nextLeftLane--;
+        } else {
+          lane = nextRightLane++;
+        }
+        const color = BRANCH_COLORS[colorIdx % BRANCH_COLORS.length];
+        colorIdx++;
+        chainLaneMap.set(root, { lane, color });
+      }
+    });
+
+    // 4. 计算每个提交节点的物理坐标 (X, Y)
+    const nodeCoords = new Map();
+    renderedNodes = commitList.map((c, index) => {
+      const isSpine = spineCommitHashes.has(c.hash);
+      let laneIndex = 0;
+      let color = SPINE_COLOR;
+
+      if (!isSpine) {
+        const root = chainRootMap.get(c.hash) || c.hash;
+        const info = chainLaneMap.get(root) || { lane: 1, color: BRANCH_COLORS[0] };
+        laneIndex = info.lane;
+        color = info.color;
+      }
+
+      const x = laneIndex * LANE_SPREAD;
+      const y = index * ROW_GAP;
+      nodeCoords.set(c.hash, { x, y, color, isSpine });
+
+      return {
+        commit: c,
+        x,
+        y,
+        color,
+        isSpine
+      };
+    });
+
+    // 5. 绘制真实 Git 边（从父节点圆心平滑连接到子节点圆心）
+    renderedEdges = [];
+    commitList.forEach(c => {
+      const from = nodeCoords.get(c.hash);
+      if (!from || !c.parents) return;
+
+      c.parents.forEach((pHash, pIndex) => {
+        const to = nodeCoords.get(pHash);
+        if (!to) return;
+
+        let edgeColor = from.isSpine && to.isSpine && pIndex === 0 ? SPINE_COLOR : from.color;
+
+        renderedEdges.push({
+          id: `${c.hash}->${pHash}`,
+          fromX: from.x,
+          fromY: from.y,
+          toX: to.x,
+          toY: to.y,
+          color: edgeColor,
+          isStraight: from.x === to.x
+        });
+      });
+    });
   }
 
-  async function fetchGraph() {
+  async function loadData() {
     loading = true;
     error = null;
     try {
       const res = await fetch('/api/git/graph');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      commits = await res.json();
-      graphRows = computeGraph(commits);
-      if (commits.length > 0 && !selectedCommit) {
-        selectedCommit = commits[0];
+      const data = await res.json();
+      branches = data.branches || [];
+      commits = data.commits || [];
+
+      if (!selectedSpine) {
+        if (branches.includes('0.0.1-dev')) {
+          selectedSpine = '0.0.1-dev';
+        } else if (data.currentBranch) {
+          selectedSpine = data.currentBranch;
+        } else if (branches.length > 0) {
+          selectedSpine = branches[0];
+        }
       }
+
+      layoutTopology(commits, selectedSpine);
     } catch (e) {
       error = e.message;
     } finally {
@@ -120,448 +188,443 @@
     }
   }
 
-  function copyText(txt) {
+  function handleSpineChange(e) {
+    selectedSpine = e.target.value;
+    layoutTopology(commits, selectedSpine);
+  }
+
+  // 点击选择节点交互
+  function selectCommit(node) {
+    if (selectedHash === node.commit.hash) {
+      selectedHash = null; // 再次点击取消
+    } else {
+      selectedHash = node.commit.hash;
+    }
+  }
+
+  function copyText(txt, e) {
+    e.stopPropagation();
     navigator.clipboard.writeText(txt);
     copiedHash = true;
     setTimeout(() => (copiedHash = false), 1500);
   }
 
+  function zoomIn() {
+    zoom = Math.min(1.8, +(zoom + 0.15).toFixed(2));
+  }
+  function zoomOut() {
+    zoom = Math.max(0.5, +(zoom - 0.15).toFixed(2));
+  }
+  function resetView() {
+    zoom = 1.0;
+    offsetX = 0;
+    offsetY = 80;
+  }
+
+  // 平移拖拽
+  function onTouchStart(e) {
+    isDragging = true;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    startX = clientX;
+    startY = clientY;
+    startOffsetX = offsetX;
+    startOffsetY = offsetY;
+  }
+  function onTouchMove(e) {
+    if (!isDragging) return;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    offsetX = startOffsetX + (clientX - startX);
+    offsetY = startOffsetY + (clientY - startY);
+  }
+  function onTouchEnd() {
+    isDragging = false;
+  }
+
   onMount(() => {
-    fetchGraph();
+    loadData();
   });
 </script>
 
-<div class="app-container">
-  <!-- 顶栏导航 -->
-  <header class="top-bar">
-    <div class="brand">
-      <div class="brand-icon">M</div>
-      <div class="brand-text">
-        <span class="title">Mobile Studio</span>
-        <span class="sub">Git Topology Graph</span>
-      </div>
-    </div>
-    <div class="actions">
-      <button class="btn-refresh" on:click={fetchGraph} disabled={loading}>
-        {loading ? '加载中...' : '刷新图谱'}
-      </button>
-    </div>
-  </header>
+<div class="viewport"
+     on:mousedown={onTouchStart}
+     on:mousemove={onTouchMove}
+     on:mouseup={onTouchEnd}
+     on:touchstart={onTouchStart}
+     on:touchmove={onTouchMove}
+     on:touchend={onTouchEnd}>
 
-  <!-- 主体工作区 -->
-  <div class="main-content">
-    {#if loading && graphRows.length === 0}
-      <div class="center-msg">正在解析 Git 提交拓扑...</div>
-    {:else if error}
-      <div class="center-msg error">加载失败: {error}</div>
-    {:else}
-      <div class="table-container">
-        <div class="log-table">
-          {#each graphRows as row (row.commit.hash)}
+  <!-- 顶部轻量浮动控制栏 -->
+  <div class="control-panel" on:mousedown|stopPropagation on:touchstart|stopPropagation>
+    <div class="spine-selector-wrap">
+      <span class="label">主轴:</span>
+      <select class="spine-select" bind:value={selectedSpine} on:change={handleSpineChange}>
+        {#each branches as b}
+          <option value={b}>{b}</option>
+        {/each}
+      </select>
+    </div>
+
+    <div class="zoom-tools">
+      <button class="btn" on:click={zoomOut}>-</button>
+      <span class="zoom-value">{Math.round(zoom * 100)}%</span>
+      <button class="btn" on:click={zoomIn}>+</button>
+      <button class="btn reset" on:click={resetView}>居中</button>
+    </div>
+  </div>
+
+  {#if loading}
+    <div class="status-msg">正在梳理拓扑树...</div>
+  {:else if error}
+    <div class="status-msg error">{error}</div>
+  {:else}
+    <!-- 拓扑画布：居中展示，纯净视觉主角 -->
+    <div class="canvas-transform"
+         style="transform: translate(calc(-50% + {offsetX}px), {offsetY}px) scale({zoom});">
+
+      <!-- 居中垂线参考光效 -->
+      <div class="spine-center-guide"></div>
+
+      <svg class="graph-svg" width="900" height={commits.length * ROW_GAP + 160}>
+        <g transform="translate(450, 40)">
+          <!-- 1. 全真贝塞尔连线 -->
+          {#each renderedEdges as e (e.id)}
+            {#if e.isStraight}
+              <line
+                x1={e.fromX}
+                y1={e.fromY}
+                x2={e.toX}
+                y2={e.toY}
+                stroke={e.color}
+                stroke-width="2.6"
+                opacity="0.85"
+              />
+            {:else}
+              <path
+                d="M {e.fromX} {e.fromY}
+                   C {e.fromX} {e.fromY + (e.toY - e.fromY) * 0.5},
+                     {e.toX}   {e.fromY + (e.toY - e.fromY) * 0.5},
+                     {e.toX}   {e.toY}"
+                fill="none"
+                stroke={e.color}
+                stroke-width="2.5"
+                opacity="0.9"
+              />
+            {/if}
+          {/each}
+
+          <!-- 2. 节点与极简标签 -->
+          {#each renderedNodes as node (node.commit.hash)}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <!-- svelte-ignore a11y-no-static-element-interactions -->
-            <div
-              class="commit-row {selectedCommit?.hash === row.commit.hash ? 'selected' : ''}"
-              style="height: {ROW_HEIGHT}px;"
-              on:click={() => (selectedCommit = row.commit)}
-            >
-              <!-- 首列：SVG 矢量拓扑轨道 -->
-              <div
-                class="graph-cell"
-                style="width: {maxLanes * LANE_WIDTH + 16}px; min-width: {maxLanes * LANE_WIDTH + 16}px;"
-              >
-                <svg
-                  width={maxLanes * LANE_WIDTH + 16}
-                  height={ROW_HEIGHT}
-                  class="graph-svg"
-                >
-                  <!-- 1. 穿透线 (Passing vertical lines) -->
-                  {#each row.passing as pCol}
-                    <line
-                      x1={pCol * LANE_WIDTH + 12}
-                      y1={0}
-                      x2={pCol * LANE_WIDTH + 12}
-                      y2={ROW_HEIGHT}
-                      stroke={getColor(pCol)}
-                      stroke-width="2"
-                      opacity="0.85"
-                    />
-                  {/each}
+            <g class="node-group"
+               transform="translate({node.x}, {node.y})"
+               on:click={() => selectCommit(node)}>
 
-                  <!-- 2. 下行路由贝塞尔曲线 (Outgoing routes to parents) -->
-                  {#each row.routes as route}
-                    {#if route.fromCol === route.toCol}
-                      <line
-                        x1={route.fromCol * LANE_WIDTH + 12}
-                        y1={ROW_HEIGHT / 2}
-                        x2={route.toCol * LANE_WIDTH + 12}
-                        y2={ROW_HEIGHT}
-                        stroke={getColor(route.fromCol)}
-                        stroke-width="2.2"
-                      />
+              <!-- 外层光晕环 -->
+              <circle
+                r={selectedHash === node.commit.hash ? 14 : (node.isSpine ? 9 : 7)}
+                fill={node.color}
+                opacity={selectedHash === node.commit.hash ? "0.4" : "0.15"}
+                class="glow-ring"
+              />
+
+              <!-- 核心彩色节点 (选中时变大) -->
+              <circle
+                r={selectedHash === node.commit.hash ? 8.5 : 5}
+                fill={node.color}
+                stroke="#060911"
+                stroke-width="2"
+                class="core-dot"
+              />
+
+              <!-- 点击选中的专属视觉反馈：中心点亮白色小圆点 -->
+              {#if selectedHash === node.commit.hash}
+                <circle
+                  r="3.2"
+                  fill="#ffffff"
+                />
+              {/if}
+
+              <!-- 极简标签：未点击时只显示分支头徽标或半透明7位Hash；点击后就地弹出详情卡片 -->
+              <foreignObject x={node.x >= 0 ? 12 : -180} y="-16" width="220" height="70" class="label-box">
+                {#if selectedHash === node.commit.hash}
+                  <!-- 选中时的详情呼出气泡 -->
+                  <div class="popover-card" on:click|stopPropagation>
+                    <div class="popover-title">{node.commit.message}</div>
+                    <div class="popover-meta">
+                      <span>{node.commit.author} · {node.commit.date}</span>
+                      <button class="hash-btn" on:click={(e) => copyText(node.commit.hash, e)}>
+                        {node.commit.shortHash}
+                        <span class="copied-badge">{copiedHash ? '已复制' : '复制'}</span>
+                      </button>
+                    </div>
+                  </div>
+                {:else}
+                  <!-- 未选中时的默认静默显示：只展示标签/分支头或淡雅Hash -->
+                  <div class="silent-label">
+                    {#if node.commit.refs && node.commit.refs.length > 0}
+                      {#each node.commit.refs as ref}
+                        <span class="ref-pill {ref === selectedSpine ? 'spine-pill' : ''}">{ref}</span>
+                      {/each}
                     {:else}
-                      <!-- 三阶贝塞尔曲线平滑过渡 (S-Curve) -->
-                      <path
-                        d="M {route.fromCol * LANE_WIDTH + 12} {ROW_HEIGHT / 2}
-                           C {route.fromCol * LANE_WIDTH + 12} {ROW_HEIGHT * 0.9},
-                             {route.toCol * LANE_WIDTH + 12} {ROW_HEIGHT * 0.6},
-                             {route.toCol * LANE_WIDTH + 12} {ROW_HEIGHT}"
-                        fill="none"
-                        stroke={getColor(Math.max(route.fromCol, route.toCol))}
-                        stroke-width="2.2"
-                        opacity="0.9"
-                      />
+                      <span class="faint-hash">{node.commit.shortHash}</span>
                     {/if}
-                  {/each}
-
-                  <!-- 3. 提交发光节点 (Commit Node) -->
-                  <circle
-                    cx={row.col * LANE_WIDTH + 12}
-                    cy={ROW_HEIGHT / 2}
-                    r={NODE_RADIUS}
-                    fill={row.color}
-                    stroke="#0f172a"
-                    stroke-width="2.5"
-                  />
-                </svg>
-              </div>
-
-              <!-- 提交信息与分支徽标 -->
-              <div class="message-cell">
-                {#if row.commit.refs && row.commit.refs.length > 0}
-                  <div class="badges-wrap">
-                    {#each row.commit.refs as ref}
-                      {#if ref.includes('HEAD')}
-                        <span class="badge head">{ref}</span>
-                      {:else if ref.includes('origin')}
-                        <span class="badge remote">{ref}</span>
-                      {:else}
-                        <span class="badge local">{ref}</span>
-                      {/if}
-                    {/each}
                   </div>
                 {/if}
-                <span class="msg-text">{row.commit.message}</span>
-              </div>
-
-              <!-- 作者 -->
-              <div class="author-cell">{row.commit.author}</div>
-
-              <!-- 相对时间 -->
-              <div class="date-cell">{row.commit.date}</div>
-
-              <!-- Short Hash -->
-              <div class="hash-cell">{row.commit.shortHash}</div>
-            </div>
+              </foreignObject>
+            </g>
           {/each}
-        </div>
-      </div>
-
-      <!-- 底部提交详情抽屉 -->
-      {#if selectedCommit}
-        <div class="detail-drawer">
-          <div class="drawer-header">
-            <span class="drawer-title">提交详情</span>
-            <div class="hash-copy-btn" on:click={() => copyText(selectedCommit.hash)}>
-              <code>{selectedCommit.hash}</code>
-              <span class="copy-hint">{copiedHash ? '已复制！' : '复制完整 Hash'}</span>
-            </div>
-          </div>
-          <div class="drawer-body">
-            <div class="drawer-meta">
-              <span><strong>作者:</strong> {selectedCommit.author}</span>
-              <span><strong>时间:</strong> {selectedCommit.date}</span>
-              <span><strong>父提交:</strong> {selectedCommit.parents.length ? selectedCommit.parents.map(p => p.slice(0, 7)).join(', ') : '无 (Root Commit)'}</span>
-            </div>
-            <div class="drawer-message">{selectedCommit.message}</div>
-          </div>
-        </div>
-      {/if}
-    {/if}
-  </div>
+        </g>
+      </svg>
+    </div>
+  {/if}
 </div>
 
 <style>
   :global(body) {
     margin: 0;
     padding: 0;
-    background-color: #0b0f19;
-    color: #e2e8f0;
+    background-color: #060911;
+    color: #f1f5f9;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     user-select: none;
     overflow: hidden;
   }
 
-  .app-container {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
+  .viewport {
+    position: relative;
     width: 100vw;
+    height: 100vh;
+    background: radial-gradient(circle at 50% 30%, #0d1527 0%, #060911 100%);
+    overflow: hidden;
+    cursor: grab;
+    touch-action: none;
   }
 
-  /* 顶栏 */
-  .top-bar {
-    height: 52px;
-    background: #0f172a;
-    border-bottom: 1px solid #1e293b;
+  .viewport:active {
+    cursor: grabbing;
+  }
+
+  /* 顶部浮动控制卡片 */
+  .control-panel {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 92vw;
+    background: rgba(15, 23, 42, 0.9);
+    backdrop-filter: blur(14px);
+    border: 1px solid rgba(51, 65, 85, 0.8);
+    padding: 5px 12px;
+    border-radius: 24px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 0 16px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-    z-index: 10;
+    gap: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+    z-index: 100;
+    box-sizing: border-box;
   }
 
-  .brand {
+  .spine-selector-wrap {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 4px;
+    flex-shrink: 1;
+    min-width: 0;
   }
 
-  .brand-icon {
-    width: 28px;
-    height: 28px;
-    background: linear-gradient(135deg, #6366f1, #38bdf8);
-    color: white;
-    font-weight: 900;
-    font-size: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 6px;
-  }
-
-  .brand-text {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .brand-text .title {
-    font-weight: 700;
-    font-size: 14px;
-    color: #f8fafc;
-  }
-
-  .brand-text .sub {
-    font-size: 10px;
+  .spine-selector-wrap .label {
+    font-size: 11px;
     color: #94a3b8;
+    font-weight: 600;
   }
 
-  .btn-refresh {
+  .spine-select {
     background: #1e293b;
     color: #38bdf8;
     border: 1px solid #334155;
-    padding: 6px 12px;
+    padding: 2px 6px;
     border-radius: 6px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+    outline: none;
+    max-width: 110px;
+    text-overflow: ellipsis;
   }
 
-  .btn-refresh:active {
-    background: #334155;
-  }
-
-  /* 主视口 */
-  .main-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    position: relative;
-  }
-
-  .center-msg {
-    margin: auto;
-    color: #64748b;
-    font-size: 14px;
-  }
-
-  .center-msg.error {
-    color: #f87171;
-  }
-
-  .table-container {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: auto;
-    background: #0b0f19;
-  }
-
-  .log-table {
-    min-width: 680px;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .commit-row {
+  .zoom-tools {
     display: flex;
     align-items: center;
-    border-bottom: 1px solid #141e33;
-    cursor: pointer;
-    transition: background 0.1s ease;
+    gap: 4px;
   }
 
-  .commit-row:hover {
-    background: #131d33;
-  }
-
-  .commit-row.selected {
+  .btn {
     background: #1e293b;
-    border-left: 3px solid #38bdf8;
+    color: #e2e8f0;
+    border: 1px solid #334155;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
   }
 
-  .graph-cell {
-    height: 100%;
-    position: relative;
-    flex-shrink: 0;
+  .btn.reset {
+    width: auto;
+    border-radius: 10px;
+    padding: 0 6px;
+    font-size: 10px;
+  }
+
+  .btn:active {
+    background: #38bdf8;
+    color: #0f172a;
+  }
+
+  .zoom-value {
+    font-size: 10px;
+    color: #94a3b8;
+    min-width: 28px;
+    text-align: center;
+    font-family: monospace;
+  }
+
+  /* 居中画布容器 */
+  .canvas-transform {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    transform-origin: 50% 0%;
+    pointer-events: none;
+    will-change: transform;
   }
 
   .graph-svg {
     display: block;
+    pointer-events: auto;
   }
 
-  .message-cell {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    padding: 0 8px;
+  .spine-center-guide {
+    position: absolute;
+    left: 450px;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: linear-gradient(180deg, rgba(56, 189, 248, 0.22) 0%, rgba(56, 189, 248, 0) 100%);
   }
 
-  .badges-wrap {
-    display: inline-flex;
-    gap: 4px;
-    flex-shrink: 0;
-  }
-
-  .badge {
-    font-size: 10px;
-    font-weight: 700;
-    padding: 2px 6px;
-    border-radius: 4px;
-  }
-
-  .badge.head {
-    background: #0284c7;
-    color: #ffffff;
-  }
-
-  .badge.local {
-    background: #059669;
-    color: #ffffff;
-  }
-
-  .badge.remote {
-    background: #475569;
-    color: #e2e8f0;
-  }
-
-  .msg-text {
-    font-size: 13px;
-    color: #f1f5f9;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-
-  .author-cell {
-    width: 110px;
-    flex-shrink: 0;
-    font-size: 12px;
-    color: #94a3b8;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    padding: 0 8px;
-  }
-
-  .date-cell {
-    width: 100px;
-    flex-shrink: 0;
-    font-size: 11px;
-    color: #64748b;
-    padding: 0 8px;
-    white-space: nowrap;
-  }
-
-  .hash-cell {
-    width: 70px;
-    flex-shrink: 0;
-    font-family: monospace;
-    font-size: 12px;
-    color: #38bdf8;
-    padding-right: 12px;
-    text-align: right;
-  }
-
-  /* 底部详情抽屉 */
-  .detail-drawer {
-    height: 120px;
-    background: #0f172a;
-    border-top: 1px solid #1e293b;
-    padding: 10px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    box-shadow: 0 -2px 10px rgba(0,0,0,0.3);
-  }
-
-  .drawer-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .drawer-title {
-    font-size: 12px;
-    font-weight: 700;
-    color: #94a3b8;
-    text-transform: uppercase;
-  }
-
-  .hash-copy-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    background: #1e293b;
-    padding: 3px 8px;
-    border-radius: 4px;
+  .node-group {
     cursor: pointer;
   }
 
-  .hash-copy-btn code {
-    font-size: 11px;
-    color: #38bdf8;
+  .core-dot {
+    transition: r 0.15s ease-out;
   }
 
-  .copy-hint {
+  .label-box {
+    overflow: visible;
+    pointer-events: auto;
+  }
+
+  .silent-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    line-height: 32px;
+  }
+
+  .faint-hash {
+    font-family: monospace;
     font-size: 10px;
-    color: #cbd5e1;
+    color: #64748b;
+    opacity: 0.35;
+    letter-spacing: 0.5px;
   }
 
-  .drawer-body {
+  .ref-pill {
+    background: #0f172a;
+    color: #38bdf8;
+    border: 1px solid #0284c7;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ref-pill.spine-pill {
+    background: #0284c7;
+    color: #ffffff;
+    box-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
+  }
+
+  /* 选中时的浮动卡片 */
+  .popover-card {
+    background: #0f172a;
+    border: 1px solid #38bdf8;
+    border-radius: 6px;
+    padding: 5px 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
+    max-width: 190px;
+    z-index: 50;
   }
 
-  .drawer-meta {
-    display: flex;
-    gap: 16px;
+  .popover-title {
     font-size: 11px;
-    color: #94a3b8;
-  }
-
-  .drawer-message {
-    font-size: 13px;
     color: #f8fafc;
-    font-weight: 500;
+    font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .popover-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 9px;
+    color: #94a3b8;
+  }
+
+  .hash-btn {
+    background: #1e293b;
+    color: #38bdf8;
+    border: 1px solid #334155;
+    font-family: monospace;
+    font-size: 9px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+
+  .copied-badge {
+    color: #34d399;
+    margin-left: 2px;
+  }
+
+  .status-msg {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #64748b;
+    font-size: 13px;
+  }
+
+  .status-msg.error {
+    color: #f87171;
   }
 </style>

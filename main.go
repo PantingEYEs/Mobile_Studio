@@ -25,10 +25,33 @@ Message   string   `json:"message"`
 Refs      []string `json:"refs"`
 }
 
+type GraphResponse struct {
+CurrentBranch string       `json:"currentBranch"`
+Branches      []string     `json:"branches"`
+Commits       []CommitNode `json:"commits"`
+}
+
 func handleGitGraph(w http.ResponseWriter, r *http.Request) {
 w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
-// 使用零字节 (%x00) 分隔字段，记录分隔符 (%x1e) 分隔提交，彻底杜绝特殊字符截断
+// 1. 获取当前分支
+curBranchCmd := exec.Command("git", "branch", "--show-current")
+curBranchOut, _ := curBranchCmd.Output()
+currentBranch := strings.TrimSpace(string(curBranchOut))
+
+// 2. 获取所有本地及远程分支列表 (供用户选择主轴)
+branchesCmd := exec.Command("git", "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+branchesOut, _ := branchesCmd.Output()
+rawBranches := strings.Split(strings.TrimSpace(string(branchesOut)), "\n")
+branches := make([]string, 0)
+for _, b := range rawBranches {
+b = strings.TrimSpace(b)
+if b != "" {
+branches = append(branches, b)
+}
+}
+
+// 3. 获取全部拓扑日志
 cmd := exec.Command("git", "log", "--all", "--topo-order", "--pretty=format:%H%x00%P%x00%an%x00%at%x00%cr%x00%s%x00%D%x1e")
 out, err := cmd.Output()
 if err != nil {
@@ -37,14 +60,10 @@ return
 }
 
 raw := string(out)
-if len(raw) == 0 {
-w.Write([]byte("[]"))
-return
-}
+commits := make([]CommitNode, 0)
 
+if len(raw) > 0 {
 records := strings.Split(raw, "\x1e")
-commits := make([]CommitNode, 0, len(records))
-
 for _, rec := range records {
 rec = strings.TrimSpace(rec)
 if len(rec) == 0 {
@@ -94,8 +113,15 @@ Message:   parts[5],
 Refs:      refs,
 })
 }
+}
 
-json.NewEncoder(w).Encode(commits)
+resp := GraphResponse{
+CurrentBranch: currentBranch,
+Branches:      branches,
+Commits:       commits,
+}
+
+json.NewEncoder(w).Encode(resp)
 }
 
 func main() {
@@ -104,10 +130,7 @@ if err != nil {
 panic(fmt.Sprintf("Failed to load embedded frontend: %v", err))
 }
 
-// 1. 注册 Git 图谱数据 API
 http.HandleFunc("/api/git/graph", handleGitGraph)
-
-// 2. 静态页面接管默认路由
 http.Handle("/", http.FileServer(http.FS(distFS)))
 
 fmt.Println("Mobile Studio is running at http://127.0.0.1:8080 ...")
