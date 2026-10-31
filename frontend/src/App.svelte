@@ -3,6 +3,7 @@
   import { layoutTopology, ROW_GAP } from './lib/graphLayout.js';
   import ControlPanel from './components/ControlPanel.svelte';
   import CommitNode from './components/CommitNode.svelte';
+  import FilePanel from './components/FilePanel.svelte';
 
   let branches = [];
   let selectedSpine = '';
@@ -12,7 +13,6 @@
 
   let selectedHash = null;
 
-  // 手势平移与双指缩放
   let zoom = 1.0;
   let offsetX = 0;
   let offsetY = 80;
@@ -129,7 +129,10 @@
      on:touchstart={onTouchStart} on:touchmove={onTouchMove} on:touchend={onTouchEnd}
      on:wheel={onWheel}>
 
-  <!-- 顶部独立组件 -->
+  <!-- 1. 左侧轻量文件树组件 -->
+  <FilePanel isRoot={true} />
+
+  <!-- 2. 顶部主轴与居中控制栏 -->
   <ControlPanel
     {branches}
     {selectedSpine}
@@ -143,7 +146,6 @@
   {:else if error}
     <div class="status-msg error">{error}</div>
   {:else}
-    <!-- 主画布舞台 -->
     <div class="canvas-transform"
          style="transform: translate(calc(-50% + {offsetX}px), {offsetY}px) scale({zoom});">
 
@@ -151,7 +153,6 @@
 
       <svg class="graph-svg" width="900" height={commits.length * ROW_GAP + 160}>
         <g transform="translate(450, 40)">
-          <!-- 贝塞尔连线层 -->
           {#each renderedEdges as e (e.id)}
             {#if e.isStraight}
               <line x1={e.fromX} y1={e.fromY} x2={e.toX} y2={e.toY} stroke={e.color} stroke-width="2.6" opacity="0.85" />
@@ -163,7 +164,6 @@
             {/if}
           {/each}
 
-          <!-- 节点与标签组件层 -->
           {#each renderedNodes as node (node.commit.hash)}
             <CommitNode
               {node}
