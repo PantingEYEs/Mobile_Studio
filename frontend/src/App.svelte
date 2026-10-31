@@ -13,11 +13,13 @@
 
   let selectedHash = null;
 
+  // 手势平移与双指缩放
   let zoom = 1.0;
   let offsetX = 0;
   let offsetY = 80;
 
   let isDragging = false;
+  let hasMoved = false;
   let startX = 0, startY = 0;
   let startOffsetX = 0, startOffsetY = 0;
 
@@ -65,8 +67,15 @@
   }
 
   function handleSelectNode(e) {
+    if (hasMoved) return;
     const node = e.detail;
     selectedHash = selectedHash === node.commit.hash ? null : node.commit.hash;
+  }
+
+  // 点击空白处取消激活：仅在未发生滑动时生效
+  function onViewportClick(e) {
+    if (hasMoved) return;
+    selectedHash = null;
   }
 
   function resetView() {
@@ -76,6 +85,7 @@
   }
 
   function onTouchStart(e) {
+    hasMoved = false;
     if (e.touches && e.touches.length === 2) {
       isPinching = true;
       isDragging = false;
@@ -106,14 +116,28 @@
     } else if (isDragging) {
       const cx = e.touches ? e.touches[0].clientX : e.clientX;
       const cy = e.touches ? e.touches[0].clientY : e.clientY;
-      offsetX = startOffsetX + (cx - startX);
-      offsetY = startOffsetY + (cy - startY);
+      const dx = cx - startX;
+      const dy = cy - startY;
+
+      if (Math.hypot(dx, dy) > 6) {
+        hasMoved = true;
+      }
+
+      offsetX = startOffsetX + dx;
+      offsetY = startOffsetY + dy;
     }
   }
 
   function onTouchEnd(e) {
     if (e.touches && e.touches.length < 2) isPinching = false;
-    if (!e.touches || e.touches.length === 0) isDragging = false;
+    if (!e.touches || e.touches.length === 0) {
+      isDragging = false;
+      isPinching = false;
+      // 延时重置移动标志位，确保移动端 click 事件捕获到真实滑动意图
+      setTimeout(() => {
+        hasMoved = false;
+      }, 250);
+    }
   }
 
   function onWheel(e) {
@@ -124,15 +148,16 @@
   onMount(() => loadData());
 </script>
 
+<!-- svelte-ignore a11y-click-events-have-key-events -->
+<!-- svelte-ignore a11y-no-static-element-interactions -->
 <div class="viewport"
+     on:click={onViewportClick}
      on:mousedown={onTouchStart} on:mousemove={onTouchMove} on:mouseup={onTouchEnd}
      on:touchstart={onTouchStart} on:touchmove={onTouchMove} on:touchend={onTouchEnd}
      on:wheel={onWheel}>
 
-  <!-- 1. 左侧轻量文件树组件 -->
   <FilePanel isRoot={true} />
 
-  <!-- 2. 顶部主轴与居中控制栏 -->
   <ControlPanel
     {branches}
     {selectedSpine}
