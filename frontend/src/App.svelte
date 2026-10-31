@@ -13,11 +13,13 @@
 
   let selectedHash = null;
 
+  // 手势平移与双指缩放
   let zoom = 1.0;
   let offsetX = 0;
   let offsetY = 80;
 
   let isDragging = false;
+  let hasMoved = false; // 标记本次手势是否发生了真实移动
   let startX = 0, startY = 0;
   let startOffsetX = 0, startOffsetY = 0;
 
@@ -64,7 +66,9 @@
     refreshLayout();
   }
 
+  // 严格校验：若刚才发生了滑动平移，坚决不触发节点点击选中！
   function handleSelectNode(e) {
+    if (hasMoved) return;
     const node = e.detail;
     selectedHash = selectedHash === node.commit.hash ? null : node.commit.hash;
   }
@@ -76,6 +80,7 @@
   }
 
   function onTouchStart(e) {
+    hasMoved = false;
     if (e.touches && e.touches.length === 2) {
       isPinching = true;
       isDragging = false;
@@ -106,14 +111,29 @@
     } else if (isDragging) {
       const cx = e.touches ? e.touches[0].clientX : e.clientX;
       const cy = e.touches ? e.touches[0].clientY : e.clientY;
-      offsetX = startOffsetX + (cx - startX);
-      offsetY = startOffsetY + (cy - startY);
+      const dx = cx - startX;
+      const dy = cy - startY;
+
+      // 位移超过 6px 判定为滑动操作
+      if (Math.hypot(dx, dy) > 6) {
+        hasMoved = true;
+      }
+
+      offsetX = startOffsetX + dx;
+      offsetY = startOffsetY + dy;
     }
   }
 
   function onTouchEnd(e) {
     if (e.touches && e.touches.length < 2) isPinching = false;
-    if (!e.touches || e.touches.length === 0) isDragging = false;
+    if (!e.touches || e.touches.length === 0) {
+      isDragging = false;
+      isPinching = false;
+      // 延时重置 hasMoved，避免 click 事件冒泡拾取到过期的未移动标志
+      setTimeout(() => {
+        hasMoved = false;
+      }, 50);
+    }
   }
 
   function onWheel(e) {
@@ -129,10 +149,8 @@
      on:touchstart={onTouchStart} on:touchmove={onTouchMove} on:touchend={onTouchEnd}
      on:wheel={onWheel}>
 
-  <!-- 1. 左侧轻量文件树组件 -->
   <FilePanel isRoot={true} />
 
-  <!-- 2. 顶部主轴与居中控制栏 -->
   <ControlPanel
     {branches}
     {selectedSpine}

@@ -8,7 +8,8 @@
   let copiedHash = false;
   const dispatch = createEventDispatcher();
 
-  function onNodeClick() {
+  function onHitboxClick(e) {
+    e.stopPropagation();
     dispatch('select', node);
   }
 
@@ -20,14 +21,13 @@
   }
 </script>
 
-<!-- svelte-ignore a11y-click-events-have-key-events -->
-<!-- svelte-ignore a11y-no-static-element-interactions -->
-<g class="node-group" transform="translate({node.x}, {node.y})" on:click={onNodeClick}>
+<g class="node-group" transform="translate({node.x}, {node.y})">
   <!-- 外发光环 -->
   <circle
     r={isSelected ? 14 : (node.isSpine ? 9 : 7)}
     fill={node.color}
     opacity={isSelected ? "0.4" : "0.15"}
+    style="pointer-events: none;"
   />
 
   <!-- 核心彩色节点 (选中时放大) -->
@@ -36,16 +36,35 @@
     fill={node.color}
     stroke="#060911"
     stroke-width="2"
+    style="pointer-events: none;"
   />
 
   <!-- 选中时的纯白内芯 -->
   {#if isSelected}
-    <circle r="3.2" fill="#ffffff" />
+    <circle r="3.2" fill="#ffffff" style="pointer-events: none;" />
   {/if}
 
-  <!-- 镜像对称标签排版 -->
-  <foreignObject x={node.isLeft ? -222 : 12} y="-14" width="210" height="80" class="label-box">
+  <!-- 专属精准触控垫：严格限制在圆点周围半径 14px，绝不干扰周围视口 -->
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <circle
+    r="14"
+    fill="transparent"
+    class="touch-hitbox"
+    on:click={onHitboxClick}
+  />
+
+  <!-- 标签排版盒子：未选中时 pointer-events 穿透，滑动屏幕绝不误触 -->
+  <foreignObject
+    x={node.isLeft ? -222 : 12}
+    y="-14"
+    width="210"
+    height="80"
+    class="label-box {isSelected ? 'active-events' : 'passthrough-events'}"
+  >
     {#if isSelected}
+      <!-- svelte-ignore a11y-click-events-have-key-events -->
+      <!-- svelte-ignore a11y-no-static-element-interactions -->
       <div class="popover-card {node.isLeft ? 'on-left' : 'on-right'}" on:click|stopPropagation>
         <div class="popover-title">{node.commit.message}</div>
         <div class="popover-meta">
@@ -72,12 +91,21 @@
 </g>
 
 <style>
-  .node-group {
+  .touch-hitbox {
     cursor: pointer;
+    touch-action: manipulation;
   }
 
   .label-box {
     overflow: visible;
+  }
+
+  /* 未选中时允许手势滑动穿透，彻底杜绝划过文字触发点击 */
+  .label-box.passthrough-events {
+    pointer-events: none;
+  }
+
+  .label-box.active-events {
     pointer-events: auto;
   }
 
