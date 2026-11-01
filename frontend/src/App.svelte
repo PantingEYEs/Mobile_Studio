@@ -13,7 +13,6 @@
 
   let selectedHash = null;
 
-  // 手势平移与双指缩放
   let zoom = 1.0;
   let offsetX = 0;
   let offsetY = 80;
@@ -61,9 +60,13 @@
     }
   }
 
-  function handleSpineChange(e) {
-    selectedSpine = e.detail;
-    refreshLayout();
+  // 点击分支药丸直接将该分支切换为主轴并重排
+  function handleSpineSelect(e) {
+    const newSpine = e.detail;
+    if (newSpine && newSpine !== selectedSpine) {
+      selectedSpine = newSpine;
+      refreshLayout();
+    }
   }
 
   function handleSelectNode(e) {
@@ -72,7 +75,6 @@
     selectedHash = selectedHash === node.commit.hash ? null : node.commit.hash;
   }
 
-  // 点击空白处取消激活：仅在未发生滑动时生效
   function onViewportClick(e) {
     if (hasMoved) return;
     selectedHash = null;
@@ -133,7 +135,6 @@
     if (!e.touches || e.touches.length === 0) {
       isDragging = false;
       isPinching = false;
-      // 延时重置移动标志位，确保移动端 click 事件捕获到真实滑动意图
       setTimeout(() => {
         hasMoved = false;
       }, 250);
@@ -158,11 +159,9 @@
 
   <FilePanel isRoot={true} />
 
+  <!-- 顶部精简悬浮控制栏 (无下拉菜单) -->
   <ControlPanel
-    {branches}
-    {selectedSpine}
     {zoom}
-    on:spineChange={handleSpineChange}
     on:resetView={resetView}
   />
 
@@ -195,6 +194,7 @@
               {selectedSpine}
               isSelected={selectedHash === node.commit.hash}
               on:select={handleSelectNode}
+              on:spineSelect={handleSpineSelect}
             />
           {/each}
         </g>
