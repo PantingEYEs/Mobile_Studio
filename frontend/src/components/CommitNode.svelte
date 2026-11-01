@@ -19,6 +19,40 @@
     copiedHash = true;
     setTimeout(() => (copiedHash = false), 1500);
   }
+
+  // 提取纯净的分支名
+  function cleanBranchName(ref) {
+    if (!ref) return '';
+    if (ref.includes('->')) {
+      return ref.split('->')[1].trim();
+    }
+    if (ref.startsWith('origin/HEAD')) {
+      return '';
+    }
+    if (ref.startsWith('origin/')) {
+      return ref.replace('origin/', '').trim();
+    }
+    if (ref.startsWith('tag:')) {
+      return '';
+    }
+    return ref.trim();
+  }
+
+  // 判断是否为主轴徽标
+  function isSpineRef(ref, currentSpine) {
+    if (!currentSpine || !ref) return false;
+    const clean = cleanBranchName(ref);
+    return clean === currentSpine;
+  }
+
+  // 点击分支药丸直接切换为主轴
+  function onPillClick(ref, e) {
+    e.stopPropagation();
+    const branchName = cleanBranchName(ref);
+    if (branchName) {
+      dispatch('spineSelect', branchName);
+    }
+  }
 </script>
 
 <g class="node-group" transform="translate({node.x}, {node.y})">
@@ -30,7 +64,7 @@
     style="pointer-events: none;"
   />
 
-  <!-- 核心彩色节点 (选中时放大) -->
+  <!-- 核心彩色节点 -->
   <circle
     r={isSelected ? 8.5 : 5}
     fill={node.color}
@@ -39,12 +73,12 @@
     style="pointer-events: none;"
   />
 
-  <!-- 选中时的纯白内芯 -->
+  <!-- 选中白芯 -->
   {#if isSelected}
     <circle r="3.2" fill="#ffffff" style="pointer-events: none;" />
   {/if}
 
-  <!-- 专属精准触控垫：严格限制在圆点周围半径 14px，绝不干扰周围视口 -->
+  <!-- 精准触控垫 (14px) -->
   <!-- svelte-ignore a11y-click-events-have-key-events -->
   <!-- svelte-ignore a11y-no-static-element-interactions -->
   <circle
@@ -54,7 +88,7 @@
     on:click={onHitboxClick}
   />
 
-  <!-- 标签排版盒子：未选中时 pointer-events 穿透，滑动屏幕绝不误触 -->
+  <!-- 标签排版盒子 -->
   <foreignObject
     x={node.isLeft ? -222 : 12}
     y="-14"
@@ -81,7 +115,15 @@
         {#if node.commit.refs && node.commit.refs.length > 0}
           <div class="pills-strip {node.isLeft ? 'justify-right' : 'justify-left'}">
             {#each node.commit.refs as ref}
-              <span class="ref-pill {ref === selectedSpine ? 'spine-pill' : ''}">{ref}</span>
+              <!-- svelte-ignore a11y-click-events-have-key-events -->
+              <!-- svelte-ignore a11y-no-static-element-interactions -->
+              <span
+                class="ref-pill {isSpineRef(ref, selectedSpine) ? 'spine-pill' : ''}"
+                on:click={(e) => onPillClick(ref, e)}
+                title="点击将此分支拉直为主轴"
+              >
+                {ref}
+              </span>
             {/each}
           </div>
         {/if}
@@ -100,7 +142,6 @@
     overflow: visible;
   }
 
-  /* 未选中时允许手势滑动穿透，彻底杜绝划过文字触发点击 */
   .label-box.passthrough-events {
     pointer-events: none;
   }
@@ -147,29 +188,38 @@
     justify-content: flex-end;
   }
 
+  /* 药丸徽标支持独立直接点击 */
   .ref-pill {
+    pointer-events: auto; /* 覆盖父级的 none，确保药丸可点击 */
     background: #0f172a;
     color: #38bdf8;
     border: 1px solid #0284c7;
     font-size: 8.5px;
     font-weight: 700;
-    padding: 0px 4px;
-    height: 14px;
-    line-height: 13px;
+    padding: 0px 5px;
+    height: 15px;
+    line-height: 14px;
     border-radius: 3px;
     box-shadow: 0 1px 4px rgba(0,0,0,0.4);
-    max-width: 110px;
+    max-width: 120px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     display: inline-block;
     box-sizing: border-box;
+    cursor: pointer;
+    transition: transform 0.1s, box-shadow 0.1s;
+  }
+
+  .ref-pill:active {
+    transform: scale(0.95);
   }
 
   .ref-pill.spine-pill {
     background: #0284c7;
     color: #ffffff;
-    box-shadow: 0 0 6px rgba(56, 189, 248, 0.5);
+    box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+    border-color: #38bdf8;
   }
 
   .popover-card {
