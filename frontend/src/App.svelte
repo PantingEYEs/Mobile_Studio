@@ -53,8 +53,7 @@
       commits = data.commits || [];
 
       if (!selectedSpine || !branches.includes(selectedSpine)) {
-        const devBranch = branches.find(b => b.endsWith('-dev'));
-        selectedSpine = devBranch || data.currentBranch || branches[0] || '';
+        selectedSpine = data.currentBranch || branches[0] || '';
       }
       refreshLayout();
     } catch (e) {
