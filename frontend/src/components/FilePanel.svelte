@@ -23,6 +23,13 @@
   let newProjName = '';
   let newProjDir = '~';
   let newProjType = 'blank';
+  let newProjPkg = '';
+  let newProjLang = 'kotlin';
+  let newProjMinSdk = '26';
+  let newProjTargetSdk = '35';
+  let newProjTemplate = 'empty_views';
+
+  $: defaultPkg = 'com.example.' + (newProjName.trim() ? newProjName.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_') : 'myapp');
 
   let showImportProjModal = false;
   let importMode = 'local'; // "local" or "clone"
@@ -174,7 +181,8 @@
     if (!newProjName.trim()) return;
     isSubmitting = true;
     try {
-      const url = `/api/fs/project/create?dir=${encodeURIComponent(newProjDir)}&name=${encodeURIComponent(newProjName.trim())}&type=${newProjType}`;
+      const pkgParam = (newProjPkg.trim() || defaultPkg);
+      const url = `/api/fs/project/create?dir=${encodeURIComponent(newProjDir)}&name=${encodeURIComponent(newProjName.trim())}&type=${newProjType}&pkg=${encodeURIComponent(pkgParam)}&lang=${encodeURIComponent(newProjLang)}&minSdk=${encodeURIComponent(newProjMinSdk)}&targetSdk=${encodeURIComponent(newProjTargetSdk)}&template=${encodeURIComponent(newProjTemplate)}`;
       const res = await fetch(url);
       const data = await res.json();
       if (data.success) {
@@ -437,6 +445,55 @@
             </label>
           </div>
         </div>
+
+        {#if newProjType === 'android'}
+          <div class="android-config-panel">
+            <div class="form-item">
+              <label>应用包名 (Package Name)</label>
+              <input type="text" bind:value={newProjPkg} placeholder={defaultPkg} />
+            </div>
+            <div class="form-item">
+              <label>开发语言 (Language)</label>
+              <div class="radio-group">
+                <label class="radio-label">
+                  <input type="radio" bind:group={newProjLang} value="kotlin" /> Kotlin
+                </label>
+                <label class="radio-label">
+                  <input type="radio" bind:group={newProjLang} value="java" /> Java
+                </label>
+              </div>
+            </div>
+            <div class="sdk-row">
+              <div class="form-item half">
+                <label>最低 SDK (Min)</label>
+                <select bind:value={newProjMinSdk}>
+                  <option value="24">API 24 (Android 7.0)</option>
+                  <option value="26">API 26 (Android 8.0)</option>
+                  <option value="29">API 29 (Android 10)</option>
+                  <option value="31">API 31 (Android 12)</option>
+                  <option value="33">API 33 (Android 13)</option>
+                  <option value="34">API 34 (Android 14)</option>
+                  <option value="35">API 35 (Android 15)</option>
+                </select>
+              </div>
+              <div class="form-item half">
+                <label>目标 SDK (Target)</label>
+                <select bind:value={newProjTargetSdk}>
+                  <option value="33">API 33 (Android 13)</option>
+                  <option value="34">API 34 (Android 14)</option>
+                  <option value="35">API 35 (Android 15)</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-item">
+              <label>初始模板 (Activity Template)</label>
+              <select bind:value={newProjTemplate}>
+                <option value="empty_views">Empty Views Activity (含 MainActivity 与布局)</option>
+                <option value="none">No Activity (仅生成基础骨架)</option>
+              </select>
+            </div>
+          </div>
+        {/if}
         <div class="modal-buttons">
           <button class="m-btn cancel" on:click={() => (showNewProjModal = false)}>取消</button>
           <button class="m-btn confirm" on:click={executeCreateProject} disabled={isSubmitting}>
@@ -1253,5 +1310,40 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     flex: 1;
+  }
+
+  .android-config-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid #1e293b;
+    border-left: 3px solid #38bdf8;
+    border-radius: 6px;
+  }
+
+  .sdk-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .form-item.half {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .form-item select {
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #f8fafc;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    outline: none;
+  }
+
+  .form-item select:focus {
+    border-color: #38bdf8;
   }
 </style>
