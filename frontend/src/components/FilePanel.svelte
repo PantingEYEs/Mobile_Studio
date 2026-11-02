@@ -14,23 +14,28 @@
   export let openCreateModal = () => {};
   export let openRenameModal = () => {};
 
-  // 根模式独立状态
   let isPanelOpen = false;
   let isProjDrawerOpen = false;
   let rootTree = null;
 
-  // 弹窗状态
+  // 模态框状态
   let showNewProjModal = false;
   let newProjName = '';
   let newProjDir = '~';
-  let newProjType = 'blank'; // "blank" or "android"
+  let newProjType = 'blank';
+
+  let showImportProjModal = false;
+  let importMode = 'local'; // "local" or "clone"
+  let importLocalPath = '~';
+  let importGitURL = '';
+  let importGitDir = '~';
 
   let showDeleteModal = false;
   let projectToDelete = null;
 
   let showCreateModal = false;
   let createTargetNode = null;
-  let createItemType = 'file'; // "file" or "dir"
+  let createItemType = 'file';
   let createItemName = '';
 
   let showRenameModal = false;
@@ -39,7 +44,6 @@
 
   let isSubmitting = false;
 
-  // 长按定时器
   let longPressTimer = null;
   let touchStartX = 0;
   let touchStartY = 0;
@@ -66,7 +70,6 @@
     localStorage.setItem('ms_projects', JSON.stringify(projects));
   }
 
-  // 单层读取接口调用
   async function fetchChildren(dirPath) {
     try {
       const rootParam = currentProject ? currentProject.path : '.';
@@ -153,7 +156,47 @@
     }
   }
 
-  // 文件夹折叠与单层按需拉取
+  // 导入项目执行逻辑 (本地 / Git Clone)
+  async function executeImportProject() {
+    isSubmitting = true;
+    try {
+      if (importMode === 'local') {
+        if (!importLocalPath.trim()) return;
+        const url = `/api/fs/project/import?path=${encodeURIComponent(importLocalPath.trim())}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.success) {
+          const newProj = { name: data.name, path: data.path };
+          projects = [...projects, newProj];
+          saveProjectsToStorage();
+          showImportProjModal = false;
+          switchProject(newProj);
+        } else {
+          alert('导入失败: ' + (data.error || '路径无效'));
+        }
+      } else {
+        if (!importGitURL.trim()) return;
+        const url = `/api/fs/project/clone?url=${encodeURIComponent(importGitURL.trim())}&dir=${encodeURIComponent(importGitDir.trim())}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.success) {
+          const newProj = { name: data.name, path: data.path };
+          projects = [...projects, newProj];
+          saveProjectsToStorage();
+          showImportProjModal = false;
+          importGitURL = '';
+          switchProject(newProj);
+        } else {
+          alert('克隆失败: ' + (data.error || '网络或仓库地址错误'));
+        }
+      }
+    } catch (e) {
+      alert('导入失败: ' + e.message);
+    } finally {
+      isSubmitting = false;
+    }
+  }
+
   async function toggleDir(dirNode, e) {
     e.stopPropagation();
     const p = dirNode.path;
@@ -176,7 +219,6 @@
     expandedDirs = { ...expandedDirs };
   }
 
-  // 新建文件/文件夹确认执行
   async function executeCreateItem() {
     if (!createItemName.trim()) return;
     isSubmitting = true;
@@ -201,7 +243,6 @@
     }
   }
 
-  // 重命名确认执行
   async function executeRenameItem() {
     if (!renameNewName.trim()) return;
     isSubmitting = true;
@@ -211,7 +252,6 @@
       const res = await fetch(url);
       const data = await res.json();
       if (data.success) {
-        // 刷新整棵树或重新载入
         loadRootTree();
         showRenameModal = false;
         renameNewName = '';
@@ -223,7 +263,6 @@
     }
   }
 
-  // 长按手势处理
   function handleTouchStart(itemNode, e) {
     if (e.touches && e.touches.length === 1) {
       touchStartX = e.touches[0].clientX;
@@ -258,7 +297,6 @@
 </script>
 
 {#if isRoot}
-  <!-- 1. 悬浮唤起按钮 -->
   <button class="panel-trigger-btn {isPanelOpen ? 'active' : ''}" on:click={togglePanel}>
     <span class="icon">📁</span>
     <span class="text">文件</span>
@@ -270,7 +308,6 @@
     <div class="panel-backdrop" on:click={togglePanel}></div>
     <div class="file-panel" on:click|stopPropagation>
       
-      <!-- 顶栏：项目名称抽屉切换器 -->
       <div class="panel-header">
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -285,7 +322,6 @@
         </div>
       </div>
 
-      <!-- 项目管理与切换下拉子面板 -->
       {#if isProjDrawerOpen}
         <div class="project-drawer">
           <div class="drawer-section-title">已有项目</div>
@@ -296,7 +332,6 @@
                   <span class="p-name">{p.name}</span>
                   <span class="p-path">{p.path}</span>
                 </div>
-                <!-- 移除项目按钮 -->
                 <button class="del-proj-btn" on:click={(e) => confirmDeleteProject(p, e)} title="从列表中清除">🗑️</button>
               </div>
             {/each}
@@ -305,14 +340,13 @@
             <button class="act-btn create" on:click={() => (showNewProjModal = true)}>
               <span>➕</span> 新建项目
             </button>
-            <button class="act-btn import" on:click={() => alert('导入功能正在开发中...')}>
+            <button class="act-btn import" on:click={() => (showImportProjModal = true)}>
               <span>📥</span> 导入项目
             </button>
           </div>
         </div>
       {/if}
 
-      <!-- 树形结构容器：最顶层以根目录文件夹节点自身包裹呈现 -->
       <div class="tree-container">
         {#if rootTree}
           <svelte:self
@@ -341,7 +375,7 @@
     </div>
   {/if}
 
-  <!-- 模态框 1：新建项目窗口 -->
+  <!-- 模态框 1：新建项目向导 -->
   {#if showNewProjModal}
     <div class="modal-backdrop">
       <div class="modal-box">
@@ -375,7 +409,53 @@
     </div>
   {/if}
 
-  <!-- 模态框 2：删除项目安全确认 -->
+  <!-- 模态框 2：导入项目向导 (本地目录 / Git Clone) -->
+  {#if showImportProjModal}
+    <div class="modal-backdrop">
+      <div class="modal-box">
+        <div class="modal-title">导入已有项目</div>
+        <div class="form-item">
+          <label>导入方式</label>
+          <div class="radio-group">
+            <label class="radio-label">
+              <input type="radio" bind:group={importMode} value="local" /> 📂 本地已有目录
+            </label>
+            <label class="radio-label">
+              <input type="radio" bind:group={importMode} value="clone" /> 🌐 Git 远程克隆
+            </label>
+          </div>
+        </div>
+
+        {#if importMode === 'local'}
+          <div class="form-item">
+            <label>本地项目目录路径</label>
+            <input type="text" bind:value={importLocalPath} placeholder="如：~/my-existing-app" />
+          </div>
+        {:else}
+          <div class="form-item">
+            <label>Git 仓库地址 (HTTPS 或 SSH)</label>
+            <input type="text" bind:value={importGitURL} placeholder="如：https://github.com/user/repo.git" />
+          </div>
+          <div class="form-item">
+            <label>存放父目录</label>
+            <input type="text" bind:value={importGitDir} placeholder="~" />
+          </div>
+          <div class="modal-warning-tip">
+            💡 克隆执行期间请保持网络畅通，完成后将自动切入该工作区。
+          </div>
+        {/if}
+
+        <div class="modal-buttons">
+          <button class="m-btn cancel" on:click={() => (showImportProjModal = false)}>取消</button>
+          <button class="m-btn confirm" on:click={executeImportProject} disabled={isSubmitting}>
+            {isSubmitting ? '导入中...' : '确认导入'}
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- 模态框 3：安全删除确认 -->
   {#if showDeleteModal && projectToDelete}
     <div class="modal-backdrop">
       <div class="modal-box">
@@ -394,7 +474,7 @@
     </div>
   {/if}
 
-  <!-- 模态框 3：新建文件/文件夹 -->
+  <!-- 模态框 4：新建文件/文件夹 -->
   {#if showCreateModal && createTargetNode}
     <div class="modal-backdrop">
       <div class="modal-box">
@@ -412,7 +492,7 @@
         </div>
         <div class="form-item">
           <label>名称</label>
-          <input type="text" bind:value={createItemName} placeholder="输入名称 (如 test.go 或 layout)" />
+          <input type="text" bind:value={createItemName} placeholder="输入名称 (如 layout 或 test.go)" />
         </div>
         <div class="modal-buttons">
           <button class="m-btn cancel" on:click={() => (showCreateModal = false)}>取消</button>
@@ -424,7 +504,7 @@
     </div>
   {/if}
 
-  <!-- 模态框 4：长按重命名 -->
+  <!-- 模态框 5：长按重命名 -->
   {#if showRenameModal && renameTargetNode}
     <div class="modal-backdrop">
       <div class="modal-box">
@@ -444,10 +524,8 @@
   {/if}
 
 {:else if node}
-  <!-- 递归子节点层 -->
   <div class="tree-node">
     {#if node.isDir}
-      <!-- 文件夹行 (含项目根目录节点) -->
       <!-- svelte-ignore a11y-click-events-have-key-events -->
       <!-- svelte-ignore a11y-no-static-element-interactions -->
       <div
@@ -470,7 +548,6 @@
           <span class="layer-loading">...</span>
         {/if}
 
-        <!-- 文件夹右侧新建按钮 [+] -->
         <button
           class="add-item-btn"
           on:click|stopPropagation={() => openCreateModal(node)}
@@ -480,7 +557,6 @@
         </button>
       </div>
 
-      <!-- 子项目容器 -->
       {#if expandedDirs[node.path]}
         <div class="children-block">
           {#if node.children && node.children.length > 0}
@@ -502,7 +578,6 @@
         </div>
       {/if}
     {:else}
-      <!-- 普通文件行 (支持点击高亮与长按重命名) -->
       <!-- svelte-ignore a11y-click-events-have-key-events -->
       <!-- svelte-ignore a11y-no-static-element-interactions -->
       <div
@@ -569,8 +644,8 @@
     top: 0;
     left: 0;
     bottom: 0;
-    width: 275px;
-    max-width: 85vw;
+    width: 280px;
+    max-width: 86vw;
     background: rgba(11, 15, 25, 0.96);
     backdrop-filter: blur(16px);
     border-right: 1px solid rgba(51, 65, 85, 0.7);
@@ -650,7 +725,6 @@
     color: #f8fafc;
   }
 
-  /* 项目管理下拉抽屉 */
   .project-drawer {
     background: #0f172a;
     border-bottom: 1px solid #334155;
@@ -749,10 +823,9 @@
   }
 
   .act-btn.import {
-    color: #94a3b8;
+    color: #34d399;
   }
 
-  /* 树形列表 */
   .tree-container {
     flex: 1;
     overflow-y: auto;
@@ -893,7 +966,6 @@
   .dot.md { background: #a78bfa; }
   .dot.default { background: #64748b; }
 
-  /* 模态框公共样式 */
   .modal-backdrop {
     position: fixed;
     inset: 0;
@@ -910,7 +982,7 @@
     background: #0f172a;
     border: 1px solid #334155;
     border-radius: 12px;
-    width: 310px;
+    width: 320px;
     max-width: 90vw;
     padding: 16px;
     display: flex;
