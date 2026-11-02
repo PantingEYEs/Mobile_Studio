@@ -44,6 +44,44 @@
 
   let isSubmitting = false;
 
+  // 文件夹选择器状态
+  let showFolderPicker = false;
+  let pickerTarget = ''; // 'newProjDir' | 'importLocalPath' | 'importGitDir'
+  let pickerCurrent = '~';
+  let pickerParent = '';
+  let pickerDirs = [];
+  let isPickerLoading = false;
+
+  async function openFolderPicker(target, initialDir) {
+    pickerTarget = target;
+    showFolderPicker = true;
+    await browseFolder(initialDir || '~');
+  }
+
+  async function browseFolder(dirPath) {
+    isPickerLoading = true;
+    try {
+      const res = await fetch(`/api/fs/browse?dir=${encodeURIComponent(dirPath)}`);
+      if (res.ok) {
+        const data = await res.json();
+        pickerCurrent = data.current || dirPath;
+        pickerParent = data.parent || '';
+        pickerDirs = data.dirs || [];
+      }
+    } catch (e) {
+      console.error('Failed to browse dir:', e);
+    } finally {
+      isPickerLoading = false;
+    }
+  }
+
+  function confirmFolderPicker() {
+    if (pickerTarget === 'newProjDir') newProjDir = pickerCurrent;
+    else if (pickerTarget === 'importLocalPath') importLocalPath = pickerCurrent;
+    else if (pickerTarget === 'importGitDir') importGitDir = pickerCurrent;
+    showFolderPicker = false;
+  }
+
   let longPressTimer = null;
   let touchStartX = 0;
   let touchStartY = 0;
@@ -386,7 +424,7 @@
         </div>
         <div class="form-item">
           <label>存放目录 (默认家目录)</label>
-          <input type="text" bind:value={newProjDir} placeholder="~" />
+          <div class="input-with-btn"><input type="text" bind:value={newProjDir} placeholder="~" /><button type="button" class="browse-btn" on:click={() => openFolderPicker('newProjDir', newProjDir)}>📂 浏览</button></div>
         </div>
         <div class="form-item">
           <label>项目类型</label>
@@ -429,7 +467,7 @@
         {#if importMode === 'local'}
           <div class="form-item">
             <label>本地项目目录路径</label>
-            <input type="text" bind:value={importLocalPath} placeholder="如：~/my-existing-app" />
+            <div class="input-with-btn"><input type="text" bind:value={importLocalPath} placeholder="如：~/my-existing-app" /><button type="button" class="browse-btn" on:click={() => openFolderPicker('importLocalPath', importLocalPath)}>📂 浏览</button></div>
           </div>
         {:else}
           <div class="form-item">
@@ -438,7 +476,7 @@
           </div>
           <div class="form-item">
             <label>存放父目录</label>
-            <input type="text" bind:value={importGitDir} placeholder="~" />
+            <div class="input-with-btn"><input type="text" bind:value={importGitDir} placeholder="~" /><button type="button" class="browse-btn" on:click={() => openFolderPicker('importGitDir', importGitDir)}>📂 浏览</button></div>
           </div>
           <div class="modal-warning-tip">
             💡 克隆执行期间请保持网络畅通，完成后将自动切入该工作区。
@@ -518,6 +556,44 @@
           <button class="m-btn confirm" on:click={executeRenameItem} disabled={isSubmitting}>
             {isSubmitting ? '保存中...' : '确认重命名'}
           </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- 模态框 6：文件夹选择器 -->
+  {#if showFolderPicker}
+    <div class="modal-backdrop picker-backdrop">
+      <div class="modal-box picker-box">
+        <div class="modal-title">选择文件夹</div>
+        <div class="picker-current-path" title={pickerCurrent}>{pickerCurrent}</div>
+        <div class="picker-list">
+          {#if pickerParent && pickerParent !== pickerCurrent}
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div class="picker-row parent-row" on:click={() => browseFolder(pickerParent)}>
+              <span>⬆️</span>
+              <span class="p-dir-name">.. (返回上一级)</span>
+            </div>
+          {/if}
+          {#if isPickerLoading}
+            <div class="empty-hint">正在读取目录...</div>
+          {:else if pickerDirs.length === 0}
+            <div class="empty-hint">(当前目录下无子文件夹)</div>
+          {:else}
+            {#each pickerDirs as d}
+              <!-- svelte-ignore a11y-click-events-have-key-events -->
+              <!-- svelte-ignore a11y-no-static-element-interactions -->
+              <div class="picker-row" on:click={() => browseFolder(d.path)}>
+                <span>📁</span>
+                <span class="p-dir-name">{d.name}</span>
+              </div>
+            {/each}
+          {/if}
+        </div>
+        <div class="modal-buttons">
+          <button class="m-btn cancel" on:click={() => (showFolderPicker = false)}>取消</button>
+          <button class="m-btn confirm" on:click={confirmFolderPicker}>✅ 选择当前目录</button>
         </div>
       </div>
     </div>
@@ -1088,5 +1164,94 @@
   .m-btn.danger {
     background: #dc2626;
     color: #ffffff;
+  }
+
+  .input-with-btn {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .input-with-btn input[type="text"] {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .browse-btn {
+    background: #1e293b;
+    border: 1px solid #38bdf8;
+    color: #38bdf8;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .browse-btn:active {
+    background: #0284c7;
+    color: #ffffff;
+  }
+
+  .picker-backdrop {
+    z-index: 350;
+  }
+
+  .picker-box {
+    width: 340px;
+    max-height: 80vh;
+  }
+
+  .picker-current-path {
+    font-size: 11px;
+    color: #38bdf8;
+    background: #090d16;
+    border: 1px solid #1e293b;
+    padding: 6px 8px;
+    border-radius: 6px;
+    word-break: break-all;
+    font-family: monospace;
+  }
+
+  .picker-list {
+    max-height: 240px;
+    overflow-y: auto;
+    background: #090d16;
+    border: 1px solid #1e293b;
+    border-radius: 6px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .picker-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #e2e8f0;
+  }
+
+  .picker-row:hover, .picker-row:active {
+    background: #1e293b;
+    color: #38bdf8;
+  }
+
+  .picker-row.parent-row {
+    color: #94a3b8;
+    border-bottom: 1px solid #1e293b;
+    font-weight: 600;
+  }
+
+  .p-dir-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
   }
 </style>

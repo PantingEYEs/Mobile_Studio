@@ -75,6 +75,58 @@ return parts[len(parts)-1]
 return "Cloned_Project"
 }
 
+// 专用于文件夹选择器的目录浏览接口（仅列出子文件夹，排除文件）
+func handleBrowseDirs(w http.ResponseWriter, r *http.Request) {
+w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+reqDir := strings.TrimSpace(r.URL.Query().Get("dir"))
+if reqDir == "" || reqDir == "~" {
+home, _ := os.UserHomeDir()
+reqDir = home
+} else if strings.HasPrefix(reqDir, "~") {
+home, _ := os.UserHomeDir()
+reqDir = filepath.Join(home, strings.TrimPrefix(reqDir, "~"))
+}
+
+fullPath := filepath.Clean(reqDir)
+info, err := os.Stat(fullPath)
+if err != nil || !info.IsDir() {
+home, _ := os.UserHomeDir()
+fullPath = home
+}
+
+entries, err := os.ReadDir(fullPath)
+if err != nil {
+http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
+return
+}
+
+var dirs []map[string]string
+for _, entry := range entries {
+if entry.IsDir() {
+name := entry.Name()
+if strings.HasPrefix(name, ".") {
+continue
+}
+dirs = append(dirs, map[string]string{
+"name": name,
+"path": filepath.Join(fullPath, name),
+})
+}
+}
+
+sort.Slice(dirs, func(i, j int) bool { return dirs[i]["name"] < dirs[j]["name"] })
+
+parent := filepath.Dir(fullPath)
+resp := map[string]interface{}{
+"current": fullPath,
+"parent":  parent,
+"dirs":    dirs,
+}
+
+json.NewEncoder(w).Encode(resp)
+}
+
 func handleFileTree(w http.ResponseWriter, r *http.Request) {
 w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
@@ -265,7 +317,6 @@ json.NewEncoder(w).Encode(map[string]interface{}{
 })
 }
 
-// 本地已有项目导入接口
 func handleProjectImport(w http.ResponseWriter, r *http.Request) {
 w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
@@ -295,7 +346,6 @@ json.NewEncoder(w).Encode(map[string]interface{}{
 })
 }
 
-// Git 远程克隆导入接口
 func handleProjectClone(w http.ResponseWriter, r *http.Request) {
 w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
@@ -440,6 +490,7 @@ http.HandleFunc("/api/fs/rename", handleFileRename)
 http.HandleFunc("/api/fs/project/create", handleProjectCreate)
 http.HandleFunc("/api/fs/project/import", handleProjectImport)
 http.HandleFunc("/api/fs/project/clone", handleProjectClone)
+http.HandleFunc("/api/fs/browse", handleBrowseDirs)
 http.Handle("/", http.FileServer(http.FS(distFS)))
 
 fmt.Println("Mobile Studio is running at http://127.0.0.1:8080 ...")
