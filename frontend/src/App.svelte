@@ -5,6 +5,9 @@
   import CommitNode from './components/CommitNode.svelte';
   import FilePanel from './components/FilePanel.svelte';
 
+  let currentProject = null;
+  let lastLoadedProjectPath = null;
+
   let branches = [];
   let selectedSpine = '';
   let commits = [];
@@ -39,18 +42,19 @@
     renderedEdges = res.edges;
   }
 
-  async function loadData() {
+  async function loadData(projPath = '.') {
     loading = true;
     error = null;
     try {
-      const res = await fetch('/api/git/graph');
+      const res = await fetch(`/api/git/graph?root=${encodeURIComponent(projPath)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       branches = data.branches || [];
       commits = data.commits || [];
 
-      if (!selectedSpine) {
-        selectedSpine = branches.includes('0.0.1-dev') ? '0.0.1-dev' : (data.currentBranch || branches[0] || '');
+      if (!selectedSpine || !branches.includes(selectedSpine)) {
+        const devBranch = branches.find(b => b.endsWith('-dev'));
+        selectedSpine = devBranch || data.currentBranch || branches[0] || '';
       }
       refreshLayout();
     } catch (e) {
@@ -58,6 +62,14 @@
     } finally {
       loading = false;
     }
+  }
+
+  $: if (currentProject && currentProject.path !== lastLoadedProjectPath) {
+    lastLoadedProjectPath = currentProject.path;
+    selectedSpine = '';
+    selectedHash = null;
+    resetView();
+    loadData(currentProject.path);
   }
 
   // 点击分支药丸直接将该分支切换为主轴并重排
@@ -146,7 +158,7 @@
     zoom = Math.min(1.8, Math.max(0.5, +(zoom - e.deltaY * 0.001).toFixed(2)));
   }
 
-  onMount(() => loadData());
+  // 由 FilePanel 初始化绑定 currentProject 后自动触发首次 loadData
 </script>
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -157,7 +169,7 @@
      on:touchstart={onTouchStart} on:touchmove={onTouchMove} on:touchend={onTouchEnd}
      on:wheel={onWheel}>
 
-  <FilePanel isRoot={true} />
+  <FilePanel isRoot={true} bind:currentProject />
 
   <!-- 顶部精简悬浮控制栏 (无下拉菜单) -->
   <ControlPanel
