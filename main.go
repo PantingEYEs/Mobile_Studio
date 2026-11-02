@@ -41,23 +41,40 @@ IsDir    bool       `json:"isDir"`
 Children []FileNode `json:"children,omitempty"`
 }
 
-// 单层精准加载接口：每次只扫描直属下一层，彻底阻断递归膨胀
+// 路径清理与防穿越安全校验
+func resolveSafePath(baseRoot string, relPath string) (string, error) {
+if baseRoot == "" || baseRoot == "." {
+baseRoot = "."
+}
+// 支持 ~ 展开为用户 HOME 目录
+if strings.HasPrefix(baseRoot, "~") {
+home, _ := os.UserHomeDir()
+baseRoot = filepath.Join(home, strings.TrimPrefix(baseRoot, "~"))
+}
+
+relPath = strings.TrimPrefix(relPath, "/")
+cleaned := filepath.Clean(filepath.FromSlash(relPath))
+if strings.HasPrefix(cleaned, "..") {
+return "", fmt.Errorf("invalid path traversal")
+}
+
+if cleaned == "." || cleaned == "" {
+return baseRoot, nil
+}
+return filepath.Join(baseRoot, cleaned), nil
+}
+
+// 1. 文件树单层按需读取接口
 func handleFileTree(w http.ResponseWriter, r *http.Request) {
 w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
+root := r.URL.Query().Get("root")
 reqPath := r.URL.Query().Get("path")
-reqPath = strings.TrimPrefix(reqPath, "/")
 
-// 路径穿越安全防护 (禁止 ../ 逃逸项目根目录)
-cleaned := filepath.Clean(filepath.FromSlash(reqPath))
-if strings.HasPrefix(cleaned, "..") || filepath.IsAbs(cleaned) {
+fullPath, err := resolveSafePath(root, reqPath)
+if err != nil {
 http.Error(w, `{"error":"Invalid path traversal"}`, http.StatusBadRequest)
 return
-}
-
-fullPath := "."
-if cleaned != "." && cleaned != "" {
-fullPath = cleaned
 }
 
 info, err := os.Stat(fullPath)
@@ -80,6 +97,8 @@ return
 var dirNodes []FileNode
 var fileNodes []FileNode
 
+cleanedRel := filepath.Clean(filepath.FromSlash(strings.TrimPrefix(reqPath, "/")))
+
 for _, entry := range entries {
 eName := entry.Name()
 if eName == ".DS_Store" {
@@ -87,8 +106,8 @@ continue
 }
 
 childRel := eName
-if cleaned != "." && cleaned != "" {
-childRel = filepath.Join(cleaned, eName)
+if cleanedRel != "." && cleanedRel != "" {
+childRel = filepath.Join(cleanedRel, eName)
 }
 webPath := filepath.ToSlash(childRel)
 
@@ -119,6 +138,127 @@ Children: append(dirNodes, fileNodes...),
 }
 
 json.NewEncoder(w).Encode(resp)
+}
+
+// 2. 新建文件或文件夹接口
+func handleFileCreate(w http.ResponseWriter, r *http.Request) {
+w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+root := r.URL.Query().Get("root")
+relPath := r.URL.Query().Get("path")
+itemType := r.URL.Query().Get("type") // "file" or "dir"
+
+fullPath, err := resolveSafePath(root, relPath)
+if err != nil {
+http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusBadRequest)
+return
+}
+
+if itemType == "dir" {
+err = os.MkdirAll(fullPath, 0755)
+} else {
+err = os.MkdirAll(filepath.Dir(fullPath), 0755)
+if err == nil {
+var f *os.File
+f, err = os.Create(fullPath)
+if err == nil {
+f.Close()
+}
+}
+}
+
+if err != nil {
+http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
+return
+}
+
+json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "path": relPath})
+}
+
+// 3. 文件或文件夹重命名接口
+func handleFileRename(w http.ResponseWriter, r *http.Request) {
+w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+root := r.URL.Query().Get("root")
+oldRelPath := r.URL.Query().Get("oldPath")
+newName := r.URL.Query().Get("newName")
+
+if strings.Contains(newName, "/") || strings.Contains(newName, "\\") || newName == "" {
+http.Error(w, `{"error":"Invalid new name"}`, http.StatusBadRequest)
+return
+}
+
+oldFullPath, err := resolveSafePath(root, oldRelPath)
+if err != nil {
+http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusBadRequest)
+return
+}
+
+parentDir := filepath.Dir(oldFullPath)
+newFullPath := filepath.Join(parentDir, newName)
+
+if err := os.Rename(oldFullPath, newFullPath); err != nil {
+http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
+return
+}
+
+json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "newName": newName})
+}
+
+// 4. 新建项目向导脚手架生成接口
+func handleProjectCreate(w http.ResponseWriter, r *http.Request) {
+w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+targetDir := r.URL.Query().Get("dir")
+projName := r.URL.Query().Get("name")
+projType := r.URL.Query().Get("type") // "blank" or "android"
+
+if projName == "" || strings.Contains(projName, "/") {
+http.Error(w, `{"error":"Invalid project name"}`, http.StatusBadRequest)
+return
+}
+
+if targetDir == "" {
+targetDir, _ = os.UserHomeDir()
+} else if strings.HasPrefix(targetDir, "~") {
+home, _ := os.UserHomeDir()
+targetDir = filepath.Join(home, strings.TrimPrefix(targetDir, "~"))
+}
+
+projFullPath := filepath.Join(targetDir, projName)
+if err := os.MkdirAll(projFullPath, 0755); err != nil {
+http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
+return
+}
+
+if projType == "android" {
+// 生成规范轻量 Android 项目脚手架 (自动预注入 aapt2 aarch64 覆盖)
+pkgPath := strings.ToLower(strings.ReplaceAll(projName, "-", "_"))
+os.MkdirAll(filepath.Join(projFullPath, "app", "src", "main", "java", "com", "example", pkgPath), 0755)
+os.MkdirAll(filepath.Join(projFullPath, "app", "src", "main", "res", "layout"), 0755)
+
+// 核心：注入 Termux aapt2 适配
+os.WriteFile(filepath.Join(projFullPath, "gradle.properties"),
+[]byte("# Android aarch64 Termux override\nandroid.aapt2FromMavenOverride=/data/data/com.termux/files/usr/bin/aapt2\n"), 0644)
+os.WriteFile(filepath.Join(projFullPath, "settings.gradle"),
+[]byte(fmt.Sprintf("rootProject.name = \"%s\"\ninclude(\":app\")\n", projName)), 0644)
+os.WriteFile(filepath.Join(projFullPath, "build.gradle"),
+[]byte("// Top-level build file\n"), 0644)
+os.WriteFile(filepath.Join(projFullPath, "README.md"),
+[]byte(fmt.Sprintf("# %s\n\nAndroid Project generated by Mobile Studio.\n", projName)), 0644)
+} else {
+// 生成空白模板
+os.WriteFile(filepath.Join(projFullPath, "README.md"),
+[]byte(fmt.Sprintf("# %s\n\nBlank Project created via Mobile Studio.\n", projName)), 0644)
+os.WriteFile(filepath.Join(projFullPath, ".gitignore"),
+[]byte("bin/\n*.log\n"), 0644)
+}
+
+json.NewEncoder(w).Encode(map[string]interface{}{
+"success": true,
+"name":    projName,
+"path":    projFullPath,
+})
 }
 
 func handleGitGraph(w http.ResponseWriter, r *http.Request) {
@@ -219,6 +359,9 @@ panic(fmt.Sprintf("Failed to load embedded frontend: %v", err))
 
 http.HandleFunc("/api/git/graph", handleGitGraph)
 http.HandleFunc("/api/fs/tree", handleFileTree)
+http.HandleFunc("/api/fs/create", handleFileCreate)
+http.HandleFunc("/api/fs/rename", handleFileRename)
+http.HandleFunc("/api/fs/project/create", handleProjectCreate)
 http.Handle("/", http.FileServer(http.FS(distFS)))
 
 fmt.Println("Mobile Studio is running at http://127.0.0.1:8080 ...")
