@@ -181,6 +181,8 @@
     <div class="status-msg">正在梳理拓扑树...</div>
   {:else if error}
     <div class="status-msg error">{error}</div>
+  {:else if commits.length === 0}
+    <div class="status-msg">该项目暂无 Git 提交记录（不是 Git 仓库或尚未提交）</div>
   {:else}
     <div class="canvas-transform"
          style="transform: translate(calc(-50% + {offsetX}px), {offsetY}px) scale({zoom});">

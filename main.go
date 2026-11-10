@@ -43,7 +43,7 @@ Children []FileNode `json:"children,omitempty"`
 
 func resolveSafePath(baseRoot string, relPath string) (string, error) {
 if baseRoot == "" || baseRoot == "." {
-baseRoot = "."
+baseRoot = selfRoot()
 }
 if strings.HasPrefix(baseRoot, "~") {
 home, _ := os.UserHomeDir()
@@ -495,6 +495,8 @@ json.NewEncoder(w).Encode(resp)
 }
 
 func main() {
+fmt.Printf("Mobile Studio project root: %s\n", selfRoot())
+
 distFS, err := fs.Sub(frontendFS, "frontend/dist")
 if err != nil {
 panic(fmt.Sprintf("Failed to load embedded frontend: %v", err))

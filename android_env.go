@@ -54,8 +54,8 @@ func expandHome(p string) string {
 // resolveProjectRoot 把前端传来的项目路径转换为绝对路径并校验其为目录。
 func resolveProjectRoot(root string) (string, error) {
 	root = strings.TrimSpace(root)
-	if root == "" {
-		root = "."
+	if root == "" || root == "." {
+		root = selfRoot()
 	}
 	abs, err := filepath.Abs(expandHome(root))
 	if err != nil {
