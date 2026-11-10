@@ -45,6 +45,23 @@
 
     m_s :q
 
+### Android 构建 / 安装 / 运行 / 日志
+
+点击右上角「▶ 运行」打开运行面板：一键执行 构建 (assembleDebug) → 安装 → 启动，并自动打开仅包含本应用进程的 Logcat。
+
+Termux 端一次性准备：
+
+    pkg install openjdk-17 gradle aapt2
+    mkdir -p ~/android-sdk/cmdline-tools && cd ~/android-sdk/cmdline-tools
+    # 从 developer.android.com 下载 commandlinetools-linux-*_latest.zip 后：
+    unzip commandlinetools-linux-*_latest.zip && mv cmdline-tools latest
+    yes | ~/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
+    ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;34.0.0"
+
+- aarch64 下的 aapt2 覆盖在构建时以 `-Pandroid.aapt2FromMavenOverride` 注入，不写入项目文件，项目在 PC / Android Studio 上可直接打开构建。
+- 设备通道按 Shizuku (`rish`) → 无线调试 (`adb`) → 无特权 的顺序自动选择。无特权时安装会跳转系统安装器、无法强停与读取应用日志。
+- 运行面板顶部「环境」徽标会列出缺失的依赖及修复命令。
+
 ## 目录结构
 
     Mobile_Studio/
