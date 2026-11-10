@@ -5,6 +5,7 @@
   import CommitNode from './components/CommitNode.svelte';
   import FilePanel from './components/FilePanel.svelte';
   import RunPanel from './components/RunPanel.svelte';
+  import TerminalView from './components/TerminalView.svelte';
 
   let currentProject = null;
   let lastLoadedProjectPath = null;
@@ -219,6 +220,9 @@
 
 <!-- 构建 / 安装 / 运行 / 日志 面板置于画布之外，避免触控事件冒泡到拓扑画布的拖拽逻辑 -->
 <RunPanel {currentProject} />
+
+<!-- 终端视图常驻挂载（隐藏时仅 display:none），切换回来时会话与滚动内容保持不变 -->
+<TerminalView {currentProject} />
 
 <style>
   :global(body) {

@@ -290,9 +290,9 @@
   onDestroy(closeAllStreams);
 </script>
 
-<button class="run-trigger {pipeRunning ? 'busy' : ''}" on:click={togglePanel}>
+<button class="run-trigger {pipeRunning ? 'busy' : ''}" aria-label="运行" on:click={togglePanel}>
   <span class="icon">{pipeRunning ? '⏳' : '▶'}</span>
-  <span>运行</span>
+  <span class="label">运行</span>
 </button>
 
 {#if isOpen}
@@ -441,6 +441,9 @@
   }
   .run-trigger.busy { color: #fbbf24; }
   .run-trigger:active { background: #1e293b; }
+  @media (max-width: 340px) {
+    .run-trigger .label { display: none; }
+  }
 
   .sheet-backdrop {
     position: fixed;
