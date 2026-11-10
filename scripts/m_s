@@ -32,9 +32,11 @@ for cmd in go git node npm; do
 done
 
 # 2. 检查前端产物：dist 缺失，或 src/index.html 有比产物更新的文件时重新构建
-if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
-    echo "[m_s] 安装前端依赖..."
-    (cd "$FRONTEND_DIR" && npm install)
+# node_modules 缺失，或 package-lock.json 比上次安装记录（npm 写入的 node_modules/.package-lock.json）更新时安装依赖
+if [ ! -f "$FRONTEND_DIR/node_modules/.package-lock.json" ] || \
+   [ "$FRONTEND_DIR/package-lock.json" -nt "$FRONTEND_DIR/node_modules/.package-lock.json" ]; then
+    echo "[m_s] 检测到前端依赖变动，正在安装..."
+    (cd "$FRONTEND_DIR" && npm install) || { echo "[m_s] 前端依赖安装失败！"; exit 1; }
 fi
 if [ ! -f "$FRONTEND_DIR/dist/index.html" ] || \
    [ -n "$(find "$FRONTEND_DIR/src" "$FRONTEND_DIR/index.html" -newer "$FRONTEND_DIR/dist/index.html" -print -quit 2>/dev/null)" ]; then

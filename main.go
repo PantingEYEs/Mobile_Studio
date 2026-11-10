@@ -520,10 +520,14 @@ http.HandleFunc("/api/android/logcat", handleAndroidLogcat)
 http.HandleFunc("/api/task/stream", handleTaskStream)
 http.HandleFunc("/api/task/stop", handleTaskStop)
 http.HandleFunc("/api/task/active", handleTaskActive)
+http.HandleFunc("/api/term/list", handleTermList)
+http.HandleFunc("/api/term/create", handleTermCreate)
+http.HandleFunc("/api/term/close", handleTermClose)
+http.HandleFunc("/api/term/ws", handleTermWS)
 http.Handle("/", http.FileServer(http.FS(distFS)))
 
 fmt.Println("Mobile Studio is running at http://127.0.0.1:8080 ...")
-if err := http.ListenAndServe("127.0.0.1:8080", nil); err != nil {
+if err := http.ListenAndServe("127.0.0.1:8080", localOnly(http.DefaultServeMux)); err != nil {
 fmt.Printf("Server exited: %v\n", err)
 }
 }
