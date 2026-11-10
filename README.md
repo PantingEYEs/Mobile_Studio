@@ -37,13 +37,15 @@
 
 该指令将自动完成：
 1. 依赖环境按需自检 (Go、Git、Node、npm)。
-2. 检测 Go 源码与前端产物变动并按需增量编译。
-3. 后台启动本地 HTTP 服务 (监听 127.0.0.1:8080)。
-4. 调起系统预设浏览器访问服务。
+2. 检测前端依赖、前端源码与 Go 源码变动并按需增量安装 / 构建 / 编译。
+3. 后台启动本地 HTTP 服务（监听 127.0.0.1，默认端口 8080，可通过 `m_s config set server.port` 修改）。
+4. 调起系统预设浏览器访问服务（`m_s start --no-browser` 或配置 `server.open_browser=false` 可跳过）。
 
 ### 停止后台服务 (Vim 风格)
 
     m_s :q
+
+Web UI 中的全部操作均有对应的命令行，详见下文「[命令行 (m_s)](#命令行-m_s)」。
 
 ### Web 终端
 
@@ -71,6 +73,129 @@ Termux 端一次性准备：
 - 设备通道按 Shizuku (`rish`) → 无线调试 (`adb`) → 无特权 的顺序自动选择。无特权时安装会跳转系统安装器、无法强停与读取应用日志。
 - 运行面板顶部「环境」徽标会列出缺失的依赖及修复命令。
 
+## 命令行 (m_s)
+
+`m_s` 既是启动器，也是 Mobile Studio 的完整命令行入口。服务生命周期命令由脚本 `scripts/m_s` 处理，其余命令由 Go 二进制通过 HTTP 调用正在运行的本地服务执行（服务未运行时会自动在后台启动，不打开浏览器）。因此 **命令行发起的构建、终端会话等会实时出现在 Web UI 中**，反之亦然；`m_s help` 可随时查看完整用法。
+
+### 服务
+
+| 命令 | 说明 |
+|---|---|
+| `m_s` / `m_s start [--no-browser]` | 按需构建并启动服务，默认打开浏览器 |
+| `m_s stop` / `m_s :q` | 停止服务（同时停止运行中的构建 / Logcat 任务并关闭终端会话） |
+| `m_s restart [--open]` | 重启服务（更新代码或修改端口后使用） |
+| `m_s status` | 服务状态：版本、PID、运行时长、运行中任务数、终端会话数 |
+| `m_s open` | 在浏览器中打开 Web UI |
+| `m_s logs [-f]` | 查看服务日志（`server.log`） |
+| `m_s rebuild` | 强制重新构建前端与后端 |
+| `m_s version` / `m_s help` | 版本 / 帮助 |
+
+### 项目
+
+命令默认作用于 **当前目录所属的已登记项目**（在项目任意子目录中执行均可），也可用 `-p` / `--project <目录>` 指定。项目列表保存在服务端，与 Web UI 左侧「项目」抽屉共享。
+
+| 命令 | 说明 |
+|---|---|
+| `m_s project list` | 列出已登记项目（`*` 为当前项目） |
+| `m_s project current` | 显示当前目录对应的项目根目录 |
+| `m_s project create <名称> [选项]` | 新建项目并登记，选项见下 |
+| `m_s project import <目录>` | 登记已有目录 |
+| `m_s project clone <仓库地址> [--dir 父目录]` | 克隆并登记 |
+| `m_s project remove <名称\|路径>` | 移出列表（不删除磁盘文件） |
+
+`project create` 选项：`--type android|blank`（默认 blank）、`--dir 父目录`（默认 `projects.default_dir`）、`--pkg 包名`、`--lang kotlin|java`、`--min-sdk N`、`--target-sdk N`、`--compile-sdk N`、`--template empty_views|none`。例如：
+
+    m_s project create MyApp --type android --lang kotlin --pkg com.example.myapp --min-sdk 26 --target-sdk 35
+
+### 文件与 Git
+
+| 命令 | 说明 |
+|---|---|
+| `m_s fs ls [相对路径]` | 列出目录（子目录以 `/` 结尾） |
+| `m_s fs new <相对路径> [--folder]` | 新建文件（或文件夹），自动创建上级目录 |
+| `m_s fs rename <相对路径> <新名称>` | 重命名 |
+| `m_s git graph [--limit N]` | 当前分支、全部分支与提交拓扑（`M` 标记合并提交；`--limit 0` 输出全部） |
+
+### Android
+
+以下命令亦可写作 `m_s android <子命令>`。任务类命令默认 **跟随日志直到结束**，退出码反映任务结果；`--detach` 仅启动并返回任务 ID；`--shell rish|adb|local` 可临时指定设备通道；Ctrl-C 会同时停止服务端任务。
+
+| 命令 | 说明 |
+|---|---|
+| `m_s env [--refresh]` | 构建环境与设备通道检查（存在阻断问题时退出码 1，`--refresh` 重新探测设备通道） |
+| `m_s build` | 构建 debug APK（`assembleDebug`） |
+| `m_s install` | 安装最近一次构建的 APK |
+| `m_s launch [--pkg 包名]` | 强停后重新启动应用 |
+| `m_s run [--pkg 包名]` | 构建 → 安装 → 启动 |
+| `m_s android stop [--pkg 包名]` | 强制停止应用（需 Shizuku 或 adb） |
+| `m_s logcat [--pkg 包名] [--all]` | 实时应用日志（默认仅本应用进程，`--all` 为全部进程） |
+
+### 任务
+
+| 命令 | 说明 |
+|---|---|
+| `m_s task list [--all]` | 当前项目（`--all` 为全部项目）的任务 |
+| `m_s task log <ID> [-f]` | 输出任务日志，`-f` 持续跟随至结束 |
+| `m_s task status <ID>` | 输出任务状态，退出码反映结果 |
+| `m_s task stop <ID>` | 停止任务 |
+
+### 终端
+
+与 Web UI「⌨ 终端」中的标签页是同一批会话：Agent 在命令行发送的命令，用户可在页面中实时看到并接手，反之亦然。`<ID>` 可写作 `last` 表示最新的会话。
+
+| 命令 | 说明 |
+|---|---|
+| `m_s term list` | 列出会话（含正在查看的页面数） |
+| `m_s term new [--cwd 目录]` | 新建会话（默认当前项目目录），输出会话 ID |
+| `m_s term send <ID> <文本> [--enter] [--ctrl-c]` | 向会话输入文本；`--enter` 追加回车，`--ctrl-c` 先发送中断 |
+| `m_s term read <ID> [--tail N] [--raw]` | 读取输出（默认去除 ANSI 转义并还原为纯文本，末 40 行；`--tail 0` 全部） |
+| `m_s term close <ID>` | 结束会话 |
+
+### 配置
+
+配置保存在 `~/.mobile_studio/config.json`（`m_s config path` 查看），只记录修改过的键；除 `server.port` 外修改后立即生效。
+
+    m_s config list                         # 查看全部配置、当前值与说明（* 为已修改）
+    m_s config get <键>                      # 输出单个值（便于脚本读取）
+    m_s config set <键> <值>
+    m_s config unset <键>                    # 恢复默认值
+
+| 键 | 默认值 | 说明 |
+|---|---|---|
+| `server.port` | `8080` | Web 服务端口，修改后执行 `m_s restart` |
+| `server.open_browser` | `true` | `m_s` / `m_s start` 时是否打开浏览器 |
+| `projects.default_dir` | `~` | 新建 / 克隆项目的默认父目录 |
+| `android.sdk_dir` | 自动 | Android SDK 路径（自动：local.properties → ANDROID_HOME → 常见位置） |
+| `android.java_home` | 自动 | JDK 目录（自动：JAVA_HOME → PATH 中的 java） |
+| `android.gradle` | 自动 | Gradle 可执行文件（自动：项目 gradlew → PATH 中的 gradle） |
+| `android.gradle_args` | 空 | 附加 Gradle 参数，如 `--offline --no-daemon` |
+| `android.aapt2` | 自动 | aapt2 覆盖路径（Termux 下自动使用 `$PREFIX/bin/aapt2`） |
+| `device.shell` | `auto` | 设备通道：`auto`（rish → adb → local）/ `rish` / `adb` / `local` |
+| `device.adb_serial` | 空 | adb 目标设备序列号（空则使用第一个已连接设备） |
+| `logcat.tail` | `300` | 开始 Logcat 时回放的历史行数 |
+| `terminal.shell` | 自动 | Web 终端 Shell（自动：$SHELL → bash → sh） |
+
+数据目录 `~/.mobile_studio/`：`config.json`（配置）、`projects.json`（项目列表）、`server.pid`（服务进程号）。环境变量 `MS_ROOT` 可覆盖 Mobile Studio 源码目录（默认 `~/Mobile_Studio`），`MS_CONFIG_DIR` 可覆盖数据目录。
+
+### 面向 Agent 的约定
+
+为便于 Agent CLI（如 Claude Code、Gemini CLI 等在 Termux 中运行的编程助手）操作 Mobile Studio，命令行遵循以下约定：
+
+- **机器可读输出**：任意命令加 `--json` 输出 JSON；失败时输出 `{"success": false, "error": "...", "exitCode": N}`。`m_s` 脚本自身的提示信息一律写入 stderr，stdout 可直接解析。
+- **流式任务**：`build` / `install` / `launch` / `run` / `logcat` / `task log -f` 在 `--json` 下输出 NDJSON，每行为 `{"type":"log","line":"..."}`，最后一行为 `{"type":"status","task":{...}}`。
+- **退出码**：`0` 成功 · `1` 执行失败（含构建失败、`env` 发现问题）· `2` 用法错误 · `3` 服务未运行 · `130` 任务被停止或中断。
+- **非阻塞**：长任务可加 `--detach` 立即返回任务 ID，之后用 `m_s task status <ID>` / `m_s task log <ID> -f` 获取结果。
+- **与用户协同**：Agent 发起的任务和终端会话在 Web UI 中实时可见；用户在页面中的操作也可通过 `m_s task list`、`m_s term read` 观察。
+
+典型流程示例：
+
+    m_s env --json                                   # 检查环境，退出码非 0 时读取 problems 字段
+    m_s project create Demo --type android --json    # 新建项目
+    cd ~/Demo && m_s run --json                      # 构建 → 安装 → 启动，逐行读取 NDJSON
+    id=$(m_s logcat --detach --json | jq -r .task.id)
+    m_s task log "$id" --json                        # 读取当前日志快照（不跟随）
+    m_s task stop "$id"
+
 ## 目录结构
 
     Mobile_Studio/
@@ -82,7 +207,7 @@ Termux 端一次性准备：
     │   └── archive/                  # 历史设计草案与阶段归档
     ├── frontend/                     # Svelte 前端工程 (Vite 构建)
     │   ├── src/
-    │   │   ├── components/           # 原子化 UI 组件 (CommitNode, ControlPanel, FilePanel)
+    │   │   ├── components/           # 原子化 UI 组件 (CommitNode, ControlPanel, FilePanel, RunPanel, TerminalView)
     │   │   ├── lib/                  # 纯算法模块 (graphLayout.js)
     │   │   └── App.svelte            # 主视口容器
     │   └── dist/                     # 前端编译静态产物 (git ignore)
@@ -91,7 +216,12 @@ Termux 端一次性准备：
     ├── AGENT.md                      # AI 协作与工程纪律规范指南
     ├── CHANGELOG.md                  # 版本变更记录
     ├── go.mod                        # Go 模块定义
-    ├── main.go                       # Go 后端主入口 (内置文件树与拓扑 API)
+    ├── main.go                       # 程序入口（无参数 / serve 启动服务，其余为 CLI）与文件树、拓扑 API
+    ├── serve.go                      # HTTP 服务、路由注册与优雅退出
+    ├── cli.go                        # m_s 命令行实现
+    ├── config.go / projects.go       # 配置与项目注册表（~/.mobile_studio）
+    ├── android_*.go / tasks.go       # Android 脚手架、环境探测、构建运行与后台任务
+    ├── term.go / pty_*.go / websocket.go  # Web 终端：伪终端、WebSocket 与会话管理
     └── README.md                     # 项目说明文档
 
 ## 协作与工程规约

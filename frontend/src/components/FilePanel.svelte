@@ -96,24 +96,57 @@
 
   const IGNORED_NAMES = new Set(['.git', 'node_modules', 'bin', 'dist', '.idea', '.vscode', '.svelte-kit']);
 
-  function loadProjectsFromStorage() {
+  const SELF_PROJECT = { name: 'Mobile_Studio', path: '.' };
+
+  // 项目列表保存在服务端注册表（~/.mobile_studio/projects.json），与 m_s project 命令共享
+  async function loadProjects() {
+    let list = projects;
     try {
-      const saved = localStorage.getItem('ms_projects');
-      if (saved) {
-        projects = JSON.parse(saved);
+      // 一次性迁移：旧版本保存在浏览器 localStorage 中的项目登记到服务端
+      const legacy = JSON.parse(localStorage.getItem('ms_projects') || 'null');
+      if (Array.isArray(legacy)) {
+        for (const p of legacy) {
+          if (p && p.path && p.path !== '.') {
+            await fetch(`/api/projects/add?path=${encodeURIComponent(p.path)}&name=${encodeURIComponent(p.name || '')}`).catch(() => {});
+          }
+        }
+        localStorage.removeItem('ms_projects');
       }
     } catch (e) {}
-
-    if (!projects || projects.length === 0) {
-      projects = [{ name: 'Mobile_Studio', path: '.' }];
+    try {
+      const res = await fetch('/api/projects');
+      const data = await res.json();
+      if (data.success) list = data.projects || [];
+    } catch (e) {
+      console.error('Failed to load projects:', e);
     }
-    if (!currentProject) {
-      currentProject = projects[0];
-    }
+    projects = list;
+    return list;
   }
 
-  function saveProjectsToStorage() {
-    localStorage.setItem('ms_projects', JSON.stringify(projects));
+  function rememberCurrent(p) {
+    try {
+      localStorage.setItem('ms_current_project', p.path);
+    } catch (e) {}
+  }
+
+  function pickInitialProject() {
+    let saved = null;
+    try {
+      saved = localStorage.getItem('ms_current_project');
+    } catch (e) {}
+    return projects.find((p) => p.path === saved) || projects[0] || SELF_PROJECT;
+  }
+
+  async function toggleProjDrawer() {
+    isProjDrawerOpen = !isProjDrawerOpen;
+    if (isProjDrawerOpen) await loadProjects();
+  }
+
+  // 新建 / 导入 / 克隆成功后：刷新列表并切换到新项目（服务端已自动登记）
+  async function openRegisteredProject(data) {
+    await loadProjects();
+    switchProject(projects.find((p) => p.path === data.path) || { name: data.name, path: data.path });
   }
 
   async function fetchChildren(dirPath) {
@@ -153,6 +186,7 @@
 
   function switchProject(p) {
     currentProject = p;
+    rememberCurrent(p);
     isProjDrawerOpen = false;
     expandedDirs = {};
     loadingDirs = {};
@@ -166,16 +200,22 @@
     showDeleteModal = true;
   }
 
-  function executeDeleteProject() {
+  async function executeDeleteProject() {
     if (!projectToDelete) return;
-    projects = projects.filter(p => p.path !== projectToDelete.path);
-    saveProjectsToStorage();
-    if (currentProject.path === projectToDelete.path) {
-      currentProject = projects[0] || { name: 'Mobile_Studio', path: '.' };
-      switchProject(currentProject);
-    }
+    const target = projectToDelete;
     showDeleteModal = false;
     projectToDelete = null;
+    try {
+      const res = await fetch(`/api/projects/remove?path=${encodeURIComponent(target.path)}`);
+      const data = await res.json();
+      if (!data.success) alert('移除失败: ' + (data.error || '未知错误'));
+    } catch (e) {
+      alert('移除失败: ' + e.message);
+    }
+    await loadProjects();
+    if (currentProject.path === target.path) {
+      switchProject(projects[0] || SELF_PROJECT);
+    }
   }
 
   async function executeCreateProject() {
@@ -187,12 +227,9 @@
       const res = await fetch(url);
       const data = await res.json();
       if (data.success) {
-        const newProj = { name: data.name, path: data.path };
-        projects = [...projects, newProj];
-        saveProjectsToStorage();
         showNewProjModal = false;
         newProjName = '';
-        switchProject(newProj);
+        await openRegisteredProject(data);
       } else {
         alert('创建失败: ' + (data.error || '未知错误'));
       }
@@ -213,11 +250,8 @@
         const res = await fetch(url);
         const data = await res.json();
         if (data.success) {
-          const newProj = { name: data.name, path: data.path };
-          projects = [...projects, newProj];
-          saveProjectsToStorage();
           showImportProjModal = false;
-          switchProject(newProj);
+          await openRegisteredProject(data);
         } else {
           alert('导入失败: ' + (data.error || '路径无效'));
         }
@@ -227,12 +261,9 @@
         const res = await fetch(url);
         const data = await res.json();
         if (data.success) {
-          const newProj = { name: data.name, path: data.path };
-          projects = [...projects, newProj];
-          saveProjectsToStorage();
           showImportProjModal = false;
           importGitURL = '';
-          switchProject(newProj);
+          await openRegisteredProject(data);
         } else {
           alert('克隆失败: ' + (data.error || '网络或仓库地址错误'));
         }
@@ -335,9 +366,10 @@
     clearTimeout(longPressTimer);
   }
 
-  onMount(() => {
+  onMount(async () => {
     if (isRoot) {
-      loadProjectsFromStorage();
+      await loadProjects();
+      if (!currentProject) currentProject = pickInitialProject();
       loadRootTree();
     }
   });
@@ -358,7 +390,7 @@
       <div class="panel-header">
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-static-element-interactions -->
-        <div class="header-title project-switch-btn" on:click={() => (isProjDrawerOpen = !isProjDrawerOpen)}>
+        <div class="header-title project-switch-btn" on:click={toggleProjDrawer}>
           <span class="proj-icon">📦</span>
           <span class="proj-name">{currentProject ? currentProject.name : '项目选择'}</span>
           <span class="switch-arrow">{isProjDrawerOpen ? '▲' : '▼'}</span>
@@ -374,9 +406,9 @@
           <div class="drawer-section-title">已有项目</div>
           <div class="project-list">
             {#each projects as p}
-              <div class="project-item {currentProject.path === p.path ? 'active' : ''}" on:click={() => switchProject(p)}>
+              <div class="project-item {currentProject.path === p.path ? 'active' : ''} {p.exists === false ? 'missing' : ''}" on:click={() => switchProject(p)}>
                 <div class="proj-info">
-                  <span class="p-name">{p.name}</span>
+                  <span class="p-name">{p.name}{#if p.exists === false}<span class="p-missing">（目录不存在）</span>{/if}</span>
                   <span class="p-path">{p.path}</span>
                 </div>
                 <button class="del-proj-btn" on:click={(e) => confirmDeleteProject(p, e)} title="从列表中清除">🗑️</button>
@@ -815,6 +847,9 @@
     border-bottom: 1px solid #1e293b;
     background: rgba(15, 23, 42, 0.6);
   }
+
+  .project-item.missing .p-name { color: #64748b; }
+  .p-missing { color: #f87171; font-size: 10px; margin-left: 4px; }
 
   .project-switch-btn {
     display: flex;

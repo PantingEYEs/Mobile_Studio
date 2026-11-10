@@ -199,7 +199,7 @@
   function onPipelineDone() {
     if (!pipeTask) return;
     // 一键运行成功后，自动开启应用日志（与 Android Studio 的 Run 行为一致）
-    if (pipeTask.kind === 'run' && pipeTask.status === 'success' && privileged && !logRunning) {
+    if (pipeTask.kind === 'run' && pipeTask.status === 'success' && startedHere.has(pipeTask.id) && privileged && !logRunning) {
       startLogcat();
     }
     if (pipeTask.status === 'success' && (pipeTask.kind === 'build' || pipeTask.kind === 'run')) {
@@ -215,7 +215,10 @@
     try {
       const res = await fetch(url);
       const data = await res.json();
-      if (data.task) attach(data.task);
+      if (data.task) {
+        if (data.success) startedHere.add(data.task.id);
+        attach(data.task);
+      }
       if (!data.success) actionMsg = data.error || '请求失败';
       return data;
     } catch (e) {
@@ -287,7 +290,29 @@
   const statusLabel = { running: '进行中', success: '成功', failed: '失败', stopped: '已停止' };
   const shellLabel = { rish: 'Shizuku', adb: 'ADB', local: '无特权' };
 
-  onDestroy(closeAllStreams);
+  // 发现由 CLI（m_s build / run / logcat 等）或其他页面启动的任务并自动接入，
+  // 使 Agent 通过命令行的操作在 Web UI 中实时可见
+  const startedHere = new Set();
+  async function pollExternalTasks() {
+    if (!currentProject || document.hidden) return;
+    try {
+      const res = await fetch(`/api/task/active?root=${encodeURIComponent(currentProject.path)}`);
+      const data = await res.json();
+      const running = (data.tasks || []).filter((t) => t.status === 'running');
+      const pipe = running.find((t) => t.kind !== 'logcat');
+      const log = running.find((t) => t.kind === 'logcat');
+      if (pipe && (!pipeTask || pipeTask.id !== pipe.id)) attach(pipe);
+      if (log && (!logTask || logTask.id !== log.id)) attach(log);
+    } catch (e) {
+      /* 服务暂不可用时忽略 */
+    }
+  }
+  const pollTimer = setInterval(pollExternalTasks, 3000);
+
+  onDestroy(() => {
+    clearInterval(pollTimer);
+    closeAllStreams();
+  });
 </script>
 
 <button class="run-trigger {pipeRunning ? 'busy' : ''}" aria-label="运行" on:click={togglePanel}>

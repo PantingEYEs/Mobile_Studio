@@ -305,6 +305,7 @@ func handleTaskStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	from, _ := strconv.Atoi(r.URL.Query().Get("from"))
+	follow := r.URL.Query().Get("follow") != "0"
 
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -330,7 +331,7 @@ func handleTaskStream(w http.ResponseWriter, r *http.Request) {
 			from = next
 			flusher.Flush()
 		}
-		if finished {
+		if finished || !follow {
 			sendStatus()
 			fmt.Fprint(w, "event: end\ndata: {}\n\n")
 			flusher.Flush()
@@ -363,6 +364,11 @@ func handleTaskStop(w http.ResponseWriter, r *http.Request) {
 // GET /api/task/active?root=...  返回该项目仍在运行（或最近结束）的任务，便于页面刷新后重新接入。
 func handleTaskActive(w http.ResponseWriter, r *http.Request) {
 	root := r.URL.Query().Get("root")
+	if root != "" {
+		if abs, err := resolveProjectRoot(root); err == nil {
+			root = abs
+		}
+	}
 	tasks.mu.Lock()
 	var list []TaskInfo
 	for _, t := range tasks.tasks {
