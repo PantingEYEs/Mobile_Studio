@@ -31,17 +31,24 @@ for cmd in go git node npm; do
     fi
 done
 
-# 2. 检查前端产物
-if [ ! -d "$FRONTEND_DIR/dist" ]; then
-    echo "[m_s] 未发现前端产物，正在构建 Svelte..."
-    (cd "$FRONTEND_DIR" && npm run build)
+# 2. 检查前端产物：dist 缺失，或 src/index.html 有比产物更新的文件时重新构建
+if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
+    echo "[m_s] 安装前端依赖..."
+    (cd "$FRONTEND_DIR" && npm install)
+fi
+if [ ! -f "$FRONTEND_DIR/dist/index.html" ] || \
+   [ -n "$(find "$FRONTEND_DIR/src" "$FRONTEND_DIR/index.html" -newer "$FRONTEND_DIR/dist/index.html" -print -quit 2>/dev/null)" ]; then
+    echo "[m_s] 检测到前端源码变动，正在构建 Svelte..."
+    (cd "$FRONTEND_DIR" && npm run build) || { echo "[m_s] 前端构建失败！"; exit 1; }
 fi
 
 # 3. 智能增量编译：main.go 变动 或 前端 dist 变动，都会触发重新打包！
 mkdir -p "$PROJECT_DIR/bin"
-if [ ! -f "$BIN_PATH" ] || [ "$PROJECT_DIR/main.go" -nt "$BIN_PATH" ] || [ "$FRONTEND_DIR/dist/index.html" -nt "$BIN_PATH" ]; then
+if [ ! -f "$BIN_PATH" ] || \
+   [ -n "$(find "$PROJECT_DIR/" -maxdepth 1 -name '*.go' -newer "$BIN_PATH" -print -quit)" ] || \
+   [ "$PROJECT_DIR/go.mod" -nt "$BIN_PATH" ] || [ "$FRONTEND_DIR/dist/index.html" -nt "$BIN_PATH" ]; then
     echo "[m_s] 检测到源码或前端静态产物变动，正在重新内嵌编译..."
-    (cd "$PROJECT_DIR" && go build -o "$BIN_PATH" main.go)
+    (cd "$PROJECT_DIR" && go build -o "$BIN_PATH" .)
     if [ $? -ne 0 ]; then
         echo "[m_s] 编译失败，请检查代码！"
         exit 1
