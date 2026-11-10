@@ -45,6 +45,15 @@
 
     m_s :q
 
+### Web 终端
+
+点击右上角「⌨ 终端」进入全屏终端，在当前项目目录启动 Termux 登录 Shell，无需在 Termux 与浏览器之间来回切换。
+
+- 多会话标签页，会话独立于页面存活：关闭页面或刷新后重新打开，会回放最近 512KB 输出并继续交互。
+- 底部为与 Termux 一致的额外按键行（ESC / - HOME ↑ END PGUP，TAB CTRL ALT ← ↓ → PGDN）；CTRL / ALT 为粘滞键，作用于下一个按键，方向键长按连发。
+- 工具栏支持粘贴剪贴板（自动适配 bracketed paste）与字号调节；Shell 退出后按回车在原目录重新启动。
+- 安全：所有 `/api/` 接口仅接受来自本机 Mobile Studio 页面的请求（校验回环 Host 与同源 Origin / Sec-Fetch-Site），防止浏览器中其它网站借助 127.0.0.1 执行命令。
+
 ### Android 构建 / 安装 / 运行 / 日志
 
 点击右上角「▶ 运行」打开运行面板：一键执行 构建 (assembleDebug) → 安装 → 启动，并自动打开仅包含本应用进程的 Logcat。
