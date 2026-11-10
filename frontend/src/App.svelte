@@ -4,6 +4,7 @@
   import ControlPanel from './components/ControlPanel.svelte';
   import CommitNode from './components/CommitNode.svelte';
   import FilePanel from './components/FilePanel.svelte';
+  import RunPanel from './components/RunPanel.svelte';
 
   let currentProject = null;
   let lastLoadedProjectPath = null;
@@ -213,6 +214,9 @@
     </div>
   {/if}
 </div>
+
+<!-- 构建 / 安装 / 运行 / 日志 面板置于画布之外，避免触控事件冒泡到拓扑画布的拖拽逻辑 -->
+<RunPanel {currentProject} />
 
 <style>
   :global(body) {
