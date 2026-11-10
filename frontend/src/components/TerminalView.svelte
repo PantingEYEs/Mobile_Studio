@@ -48,7 +48,20 @@
       const res = await fetch('/api/term/list');
       const data = await res.json();
       sessions = (data.sessions || []).map(toSession);
-      if (sessions.length && !sessions.find((s) => s.id === activeId)) activeId = sessions[0].id;
+      // 已在服务端关闭（如 m_s term close）的会话：释放本地 xterm 与连接
+      for (const [id, r] of rt) {
+        if (!sessions.find((s) => s.id === id)) {
+          r.closedByUs = true;
+          clearTimeout(r.retry);
+          if (r.ws) r.ws.close();
+          r.term.dispose();
+          rt.delete(id);
+        }
+      }
+      if (sessions.length && !sessions.find((s) => s.id === activeId)) {
+        activeId = sessions[0].id;
+        if (open) activate(activeId);
+      }
     } catch (e) {
       errorMsg = '读取终端会话失败: ' + e.message;
     }
@@ -361,6 +374,11 @@
     return parts[parts.length - 1] || '/';
   }
 
+  // 终端视图打开时定期同步会话列表，使 m_s term new / close 的变化即时可见
+  const sessionPoll = setInterval(() => {
+    if (open && !document.hidden) loadSessions();
+  }, 3000);
+
   let ro;
   onMount(() => {
     ro = new ResizeObserver(() => fitActive());
@@ -373,6 +391,7 @@
 
   onDestroy(() => {
     if (ro) ro.disconnect();
+    clearInterval(sessionPoll);
     stopRepeat();
     window.removeEventListener('pointerup', stopRepeat);
     window.removeEventListener('pointercancel', stopRepeat);
