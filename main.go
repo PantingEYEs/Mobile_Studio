@@ -284,150 +284,30 @@ home, _ := os.UserHomeDir()
 targetDir = filepath.Join(home, strings.TrimPrefix(targetDir, "~"))
 }
 
+var scaffold *androidScaffold
+if projType == "android" {
+sc, err := newAndroidScaffold(projName, r.URL.Query())
+if err != nil {
+writeErr(w, http.StatusBadRequest, "%v", err)
+return
+}
+scaffold = sc
+}
+
 projFullPath := filepath.Join(targetDir, projName)
+if entries, err := os.ReadDir(projFullPath); err == nil && len(entries) > 0 {
+writeErr(w, http.StatusConflict, "目录已存在且不为空: %s", projFullPath)
+return
+}
 if err := os.MkdirAll(projFullPath, 0755); err != nil {
-http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
+writeErr(w, http.StatusInternalServerError, "%v", err)
 return
 }
 
-if projType == "android" {
-pkgName := strings.TrimSpace(r.URL.Query().Get("pkg"))
-if pkgName == "" {
-cleanSub := strings.ToLower(strings.ReplaceAll(projName, "-", "_"))
-pkgName = "com.example." + cleanSub
-}
-lang := strings.TrimSpace(r.URL.Query().Get("lang"))
-if lang != "java" && lang != "kotlin" {
-lang = "kotlin"
-}
-minSdk := strings.TrimSpace(r.URL.Query().Get("minSdk"))
-if minSdk == "" {
-minSdk = "26"
-}
-targetSdk := strings.TrimSpace(r.URL.Query().Get("targetSdk"))
-if targetSdk == "" {
-targetSdk = "35"
-}
-tmpl := strings.TrimSpace(r.URL.Query().Get("template"))
-if tmpl == "" {
-tmpl = "empty_views"
-}
-
-srcRoot := "java"
-if lang == "kotlin" {
-srcRoot = "kotlin"
-}
-pkgRelPath := filepath.FromSlash(strings.ReplaceAll(pkgName, ".", "/"))
-srcDir := filepath.Join(projFullPath, "app", "src", "main", srcRoot, pkgRelPath)
-resLayoutDir := filepath.Join(projFullPath, "app", "src", "main", "res", "layout")
-resValuesDir := filepath.Join(projFullPath, "app", "src", "main", "res", "values")
-
-os.MkdirAll(srcDir, 0755)
-os.MkdirAll(resLayoutDir, 0755)
-os.MkdirAll(resValuesDir, 0755)
-
-os.WriteFile(filepath.Join(projFullPath, "gradle.properties"),
-[]byte("# Android aarch64 Termux override\nandroid.useAndroidX=true\nandroid.aapt2FromMavenOverride=/data/data/com.termux/files/usr/bin/aapt2\n"), 0644)
-os.WriteFile(filepath.Join(projFullPath, "settings.gradle"),
-[]byte(fmt.Sprintf("rootProject.name = \"%s\"\ninclude(\":app\")\n", projName)), 0644)
-os.WriteFile(filepath.Join(projFullPath, "build.gradle"),
-[]byte("// Top-level build file\n"), 0644)
-
-appGradle := fmt.Sprintf(`plugins {
-    id 'com.android.application'
-}
-
-android {
-    namespace '%s'
-    compileSdk %s
-
-    defaultConfig {
-        applicationId "%s"
-        minSdk %s
-        targetSdk %s
-        versionCode 1
-        versionName "1.0"
-    }
-}
-`, pkgName, targetSdk, pkgName, minSdk, targetSdk)
-os.WriteFile(filepath.Join(projFullPath, "app", "build.gradle"), []byte(appGradle), 0644)
-
-stringsXml := fmt.Sprintf("<resources>\n    <string name=\"app_name\">%s</string>\n</resources>\n", projName)
-os.WriteFile(filepath.Join(resValuesDir, "strings.xml"), []byte(stringsXml), 0644)
-
-if tmpl == "empty_views" {
-manifestXml := `<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application
-        android:label="@string/app_name">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-    </application>
-</manifest>
-`
-os.WriteFile(filepath.Join(projFullPath, "app", "src", "main", "AndroidManifest.xml"), []byte(manifestXml), 0644)
-
-layoutXml := `<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:gravity="center"
-    android:orientation="vertical">
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Hello Mobile Studio!"
-        android:textSize="20sp" />
-</LinearLayout>
-`
-os.WriteFile(filepath.Join(resLayoutDir, "activity_main.xml"), []byte(layoutXml), 0644)
-
-if lang == "kotlin" {
-ktCode := fmt.Sprintf(`package %s
-
-import android.app.Activity
-import android.os.Bundle
-
-class MainActivity : Activity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-    }
-}
-`, pkgName)
-os.WriteFile(filepath.Join(srcDir, "MainActivity.kt"), []byte(ktCode), 0644)
-} else {
-javaCode := fmt.Sprintf(`package %s;
-
-import android.app.Activity;
-import android.os.Bundle;
-
-public class MainActivity extends Activity {
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-    }
-}
-`, pkgName)
-os.WriteFile(filepath.Join(srcDir, "MainActivity.java"), []byte(javaCode), 0644)
-}
-} else {
-manifestXml := `<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application
-        android:label="@string/app_name">
-    </application>
-</manifest>
-`
-os.WriteFile(filepath.Join(projFullPath, "app", "src", "main", "AndroidManifest.xml"), []byte(manifestXml), 0644)
+if scaffold != nil {
+if err := scaffold.write(projFullPath); err != nil {
+writeErr(w, http.StatusInternalServerError, "%v", err)
+return
 }
 }
 
@@ -628,6 +508,16 @@ http.HandleFunc("/api/fs/project/create", handleProjectCreate)
 http.HandleFunc("/api/fs/project/import", handleProjectImport)
 http.HandleFunc("/api/fs/project/clone", handleProjectClone)
 http.HandleFunc("/api/fs/browse", handleBrowseDirs)
+http.HandleFunc("/api/android/env", handleAndroidEnv)
+http.HandleFunc("/api/android/build", handleAndroidBuild)
+http.HandleFunc("/api/android/install", handleAndroidInstall)
+http.HandleFunc("/api/android/launch", handleAndroidLaunch)
+http.HandleFunc("/api/android/run", handleAndroidRun)
+http.HandleFunc("/api/android/stop", handleAndroidStop)
+http.HandleFunc("/api/android/logcat", handleAndroidLogcat)
+http.HandleFunc("/api/task/stream", handleTaskStream)
+http.HandleFunc("/api/task/stop", handleTaskStop)
+http.HandleFunc("/api/task/active", handleTaskActive)
 http.Handle("/", http.FileServer(http.FS(distFS)))
 
 fmt.Println("Mobile Studio is running at http://127.0.0.1:8080 ...")

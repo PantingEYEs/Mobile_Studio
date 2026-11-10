@@ -27,6 +27,7 @@
   let newProjLang = 'kotlin';
   let newProjMinSdk = '26';
   let newProjTargetSdk = '35';
+  let newProjCompileSdk = '35';
   let newProjTemplate = 'empty_views';
 
   $: defaultPkg = 'com.example.' + (newProjName.trim() ? newProjName.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_') : 'myapp');
@@ -182,7 +183,7 @@
     isSubmitting = true;
     try {
       const pkgParam = (newProjPkg.trim() || defaultPkg);
-      const url = `/api/fs/project/create?dir=${encodeURIComponent(newProjDir)}&name=${encodeURIComponent(newProjName.trim())}&type=${newProjType}&pkg=${encodeURIComponent(pkgParam)}&lang=${encodeURIComponent(newProjLang)}&minSdk=${encodeURIComponent(newProjMinSdk)}&targetSdk=${encodeURIComponent(newProjTargetSdk)}&template=${encodeURIComponent(newProjTemplate)}`;
+      const url = `/api/fs/project/create?dir=${encodeURIComponent(newProjDir)}&name=${encodeURIComponent(newProjName.trim())}&type=${newProjType}&pkg=${encodeURIComponent(pkgParam)}&lang=${encodeURIComponent(newProjLang)}&minSdk=${encodeURIComponent(newProjMinSdk)}&targetSdk=${encodeURIComponent(newProjTargetSdk)}&compileSdk=${encodeURIComponent(newProjCompileSdk)}&template=${encodeURIComponent(newProjTemplate)}`;
       const res = await fetch(url);
       const data = await res.json();
       if (data.success) {
@@ -485,6 +486,17 @@
                 </select>
               </div>
             </div>
+            <div class="form-item">
+              <label>编译 SDK (Compile)</label>
+              <select bind:value={newProjCompileSdk}>
+                <option value="33">API 33 (Android 13)</option>
+                <option value="34">API 34 (Android 14)</option>
+                <option value="35">API 35 (Android 15)</option>
+              </select>
+            </div>
+            {#if +newProjMinSdk > +newProjTargetSdk || +newProjTargetSdk > +newProjCompileSdk}
+              <div class="sdk-warning">需满足 Min ≤ Target ≤ Compile</div>
+            {/if}
             <div class="form-item">
               <label>初始模板 (Activity Template)</label>
               <select bind:value={newProjTemplate}>
@@ -1321,6 +1333,11 @@
     border: 1px solid #1e293b;
     border-left: 3px solid #38bdf8;
     border-radius: 6px;
+  }
+
+  .sdk-warning {
+    font-size: 11px;
+    color: #f87171;
   }
 
   .sdk-row {
