@@ -4,7 +4,6 @@ import (
 "embed"
 "encoding/json"
 "fmt"
-"io/fs"
 "net/http"
 "os"
 "os/exec"
@@ -278,7 +277,7 @@ return
 }
 
 if targetDir == "" {
-targetDir, _ = os.UserHomeDir()
+targetDir = expandHome(cfgString("projects.default_dir"))
 } else if strings.HasPrefix(targetDir, "~") {
 home, _ := os.UserHomeDir()
 targetDir = filepath.Join(home, strings.TrimPrefix(targetDir, "~"))
@@ -311,10 +310,15 @@ return
 }
 }
 
+proj, _, err := addProject(projFullPath, projName)
+if err != nil {
+writeErr(w, http.StatusInternalServerError, "项目已创建但登记失败: %v", err)
+return
+}
 json.NewEncoder(w).Encode(map[string]interface{}{
 "success": true,
-"name":    projName,
-"path":    projFullPath,
+"name":    proj.Name,
+"path":    proj.Path,
 })
 }
 
@@ -339,11 +343,15 @@ http.Error(w, `{"error":"目标路径不是一个文件夹"}`, http.StatusBadReq
 return
 }
 
-name := filepath.Base(fullPath)
+proj, _, err := addProject(fullPath, "")
+if err != nil {
+writeErr(w, http.StatusBadRequest, "%v", err)
+return
+}
 json.NewEncoder(w).Encode(map[string]interface{}{
 "success": true,
-"name":    name,
-"path":    fullPath,
+"name":    proj.Name,
+"path":    proj.Path,
 })
 }
 
@@ -359,7 +367,7 @@ return
 }
 
 if targetDir == "" {
-targetDir, _ = os.UserHomeDir()
+targetDir = expandHome(cfgString("projects.default_dir"))
 } else if strings.HasPrefix(targetDir, "~") {
 home, _ := os.UserHomeDir()
 targetDir = filepath.Join(home, strings.TrimPrefix(targetDir, "~"))
@@ -382,10 +390,15 @@ return
 repoName := parseRepoName(repoURL)
 projFullPath := filepath.Join(targetDir, repoName)
 
+proj, _, err := addProject(projFullPath, repoName)
+if err != nil {
+writeErr(w, http.StatusInternalServerError, "克隆成功但登记失败: %v", err)
+return
+}
 json.NewEncoder(w).Encode(map[string]interface{}{
 "success": true,
-"name":    repoName,
-"path":    projFullPath,
+"name":    proj.Name,
+"path":    proj.Path,
 })
 }
 
@@ -495,39 +508,9 @@ json.NewEncoder(w).Encode(resp)
 }
 
 func main() {
-fmt.Printf("Mobile Studio project root: %s\n", selfRoot())
-
-distFS, err := fs.Sub(frontendFS, "frontend/dist")
-if err != nil {
-panic(fmt.Sprintf("Failed to load embedded frontend: %v", err))
+args := os.Args[1:]
+if len(args) == 0 || args[0] == "serve" {
+os.Exit(serve())
 }
-
-http.HandleFunc("/api/git/graph", handleGitGraph)
-http.HandleFunc("/api/fs/tree", handleFileTree)
-http.HandleFunc("/api/fs/create", handleFileCreate)
-http.HandleFunc("/api/fs/rename", handleFileRename)
-http.HandleFunc("/api/fs/project/create", handleProjectCreate)
-http.HandleFunc("/api/fs/project/import", handleProjectImport)
-http.HandleFunc("/api/fs/project/clone", handleProjectClone)
-http.HandleFunc("/api/fs/browse", handleBrowseDirs)
-http.HandleFunc("/api/android/env", handleAndroidEnv)
-http.HandleFunc("/api/android/build", handleAndroidBuild)
-http.HandleFunc("/api/android/install", handleAndroidInstall)
-http.HandleFunc("/api/android/launch", handleAndroidLaunch)
-http.HandleFunc("/api/android/run", handleAndroidRun)
-http.HandleFunc("/api/android/stop", handleAndroidStop)
-http.HandleFunc("/api/android/logcat", handleAndroidLogcat)
-http.HandleFunc("/api/task/stream", handleTaskStream)
-http.HandleFunc("/api/task/stop", handleTaskStop)
-http.HandleFunc("/api/task/active", handleTaskActive)
-http.HandleFunc("/api/term/list", handleTermList)
-http.HandleFunc("/api/term/create", handleTermCreate)
-http.HandleFunc("/api/term/close", handleTermClose)
-http.HandleFunc("/api/term/ws", handleTermWS)
-http.Handle("/", http.FileServer(http.FS(distFS)))
-
-fmt.Println("Mobile Studio is running at http://127.0.0.1:8080 ...")
-if err := http.ListenAndServe("127.0.0.1:8080", localOnly(http.DefaultServeMux)); err != nil {
-fmt.Printf("Server exited: %v\n", err)
-}
+os.Exit(runCLI(args))
 }

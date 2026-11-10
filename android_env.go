@@ -30,6 +30,9 @@ func isTermux() bool {
 
 // termuxAapt2 返回 Termux 原生 aarch64 aapt2 路径（Maven 上的 aapt2 只有 x86_64 版本）。
 func termuxAapt2() string {
+	if p := cfgString("android.aapt2"); p != "" {
+		return expandHome(p)
+	}
 	if !isTermux() {
 		return ""
 	}
@@ -138,6 +141,9 @@ func looksLikeSdk(p string) bool {
 func detectSdk(projectRoot string) *SdkInfo {
 	type cand struct{ path, source string }
 	var cands []cand
+	if v := cfgString("android.sdk_dir"); v != "" {
+		cands = append(cands, cand{v, "config"})
+	}
 	if projectRoot != "" {
 		if v := readProperties(filepath.Join(projectRoot, "local.properties"))["sdk.dir"]; v != "" {
 			cands = append(cands, cand{v, "local.properties"})
@@ -181,7 +187,13 @@ type ToolInfo struct {
 
 func detectJava() *ToolInfo {
 	javaBin := ""
-	if jh := os.Getenv("JAVA_HOME"); jh != "" {
+	if jh := cfgString("android.java_home"); jh != "" {
+		p := filepath.Join(expandHome(jh), "bin", "java")
+		if _, err := os.Stat(p); err == nil {
+			javaBin = p
+		}
+	}
+	if jh := os.Getenv("JAVA_HOME"); javaBin == "" && jh != "" {
 		p := filepath.Join(jh, "bin", "java")
 		if _, err := os.Stat(p); err == nil {
 			javaBin = p
@@ -224,6 +236,9 @@ func javaMajor(t *ToolInfo) int {
 
 // detectGradle 优先使用项目自带的 gradlew，否则使用系统 gradle。
 func detectGradle(projectRoot string) *ToolInfo {
+	if p := cfgString("android.gradle"); p != "" {
+		return &ToolInfo{Path: expandHome(p), Version: "config"}
+	}
 	if projectRoot != "" {
 		w := filepath.Join(projectRoot, "gradlew")
 		jar := filepath.Join(projectRoot, "gradle", "wrapper", "gradle-wrapper.jar")
@@ -286,8 +301,8 @@ func (d DeviceShell) Output(timeout time.Duration, script string) (string, error
 
 var (
 	shellCacheMu sync.Mutex
-	shellCache   *DeviceShell
-	shellCacheAt time.Time
+	shellCache   = map[string]DeviceShell{}
+	shellCacheAt = map[string]time.Time{}
 )
 
 func probeRish() (bool, string) {
@@ -309,7 +324,10 @@ func probeAdb() (bool, string, string) {
 	if _, err := exec.LookPath("adb"); err != nil {
 		return false, "", "未找到 adb"
 	}
-	want := os.Getenv("MS_ADB_SERIAL")
+	want := cfgString("device.adb_serial")
+	if want == "" {
+		want = os.Getenv("MS_ADB_SERIAL")
+	}
 	out := quickOutput(6*time.Second, "adb", "devices")
 	var serials []string
 	for _, l := range strings.Split(out, "\n") {
@@ -332,13 +350,19 @@ func probeAdb() (bool, string, string) {
 	return true, serial, "adb 已连接 " + serial
 }
 
-// detectDeviceShell 自动选择可用的最高权限通道，结果缓存 15 秒。
-// prefer 可为 rish / adb / local，用于强制指定。
+// detectDeviceShell 选择设备通道：显式指定 (prefer) > 配置 device.shell > 自动（rish → adb → local）。
+// 结果按通道缓存 15 秒，refresh 为 true 时强制重新探测。
 func detectDeviceShell(prefer string, refresh bool) DeviceShell {
+	if prefer == "" || prefer == "auto" {
+		prefer = cfgString("device.shell")
+		if prefer == "auto" {
+			prefer = ""
+		}
+	}
 	shellCacheMu.Lock()
 	defer shellCacheMu.Unlock()
-	if prefer == "" && !refresh && shellCache != nil && time.Since(shellCacheAt) < 15*time.Second {
-		return *shellCache
+	if d, ok := shellCache[prefer]; ok && !refresh && time.Since(shellCacheAt[prefer]) < 15*time.Second {
+		return d
 	}
 
 	var notes []string
@@ -360,10 +384,11 @@ func detectDeviceShell(prefer string, refresh bool) DeviceShell {
 		return DeviceShell{Mode: "local", Detail: "无特权通道（" + strings.Join(notes, "；") + "），仅支持系统安装器安装与普通启动"}
 	}
 	d := pick()
-	if prefer == "" {
-		shellCache = &d
-		shellCacheAt = time.Now()
+	if prefer == "local" {
+		d = DeviceShell{Mode: "local", Detail: "已按配置使用无特权通道"}
 	}
+	shellCache[prefer] = d
+	shellCacheAt[prefer] = time.Now()
 	return d
 }
 

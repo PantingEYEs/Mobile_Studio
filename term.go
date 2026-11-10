@@ -8,6 +8,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -220,6 +221,11 @@ func (m *TermManager) List() []TermInfo {
 
 // detectShell 优先使用 $SHELL，其次 bash，最后 sh。
 func detectShell() string {
+	if sh := cfgString("terminal.shell"); sh != "" {
+		if p, err := exec.LookPath(expandHome(sh)); err == nil {
+			return p
+		}
+	}
 	if sh := os.Getenv("SHELL"); sh != "" {
 		if st, err := os.Stat(sh); err == nil && !st.IsDir() {
 			return sh
@@ -367,6 +373,47 @@ func handleTermCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "session": s.Info()})
+}
+
+// GET /api/term/read?id=   返回会话滚动缓冲的原始字节（含 ANSI 转义）
+func handleTermRead(w http.ResponseWriter, r *http.Request) {
+	s := terms.Get(r.URL.Query().Get("id"))
+	if s == nil {
+		writeErr(w, http.StatusNotFound, "终端会话不存在")
+		return
+	}
+	s.mu.Lock()
+	data := append([]byte(nil), s.scrollback...)
+	s.mu.Unlock()
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Write(data)
+}
+
+// POST /api/term/input?id=   请求体原样写入终端（等同键盘输入）
+func handleTermInput(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "需要 POST")
+		return
+	}
+	s := terms.Get(r.URL.Query().Get("id"))
+	if s == nil {
+		writeErr(w, http.StatusNotFound, "终端会话不存在")
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	if s.Info().Exited {
+		writeErr(w, http.StatusConflict, "终端会话已退出")
+		return
+	}
+	if _, err := s.ptmx.Write(data); err != nil {
+		writeErr(w, http.StatusInternalServerError, "%v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "bytes": len(data)})
 }
 
 // GET /api/term/close?id=

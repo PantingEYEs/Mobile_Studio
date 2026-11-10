@@ -99,6 +99,9 @@ func doBuild(ctx context.Context, t *Task, root string) (string, error) {
 
 	module := env.Project.AppModule
 	args := []string{":" + module + ":assembleDebug", "--console=plain"}
+	if extra := strings.Fields(cfgString("android.gradle_args")); len(extra) > 0 {
+		args = append(args, extra...)
+	}
 	if env.Aapt2 != "" {
 		// 以命令行属性注入，避免把设备相关路径写进项目文件，项目拿到 PC 上仍可直接构建
 		args = append(args, "-Pandroid.aapt2FromMavenOverride="+env.Aapt2)
@@ -416,7 +419,7 @@ func doLogcat(ctx context.Context, t *Task, pkg string, all bool, sh DeviceShell
 		}
 	}
 
-	_, err := runStreaming(ctx, t, sh.Command(ctx, "logcat -v threadtime -T 300"), StreamOpts{Filter: filter})
+	_, err := runStreaming(ctx, t, sh.Command(ctx, fmt.Sprintf("logcat -v threadtime -T %d", max(1, cfgInt("logcat.tail")))), StreamOpts{Filter: filter})
 	return err
 }
 
