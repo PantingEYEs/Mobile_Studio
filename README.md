@@ -114,9 +114,11 @@ Termux 端一次性准备：
 | `m_s project clone <仓库地址> [--dir 父目录]` | 克隆并登记 |
 | `m_s project remove <名称\|路径>` | 移出列表（不删除磁盘文件） |
 
-`project create` 选项：`--type android|blank`（默认 blank）、`--dir 父目录`（默认 `projects.default_dir`）、`--pkg 包名`、`--lang kotlin|java`、`--min-sdk N`、`--target-sdk N`、`--compile-sdk N`、`--template empty_views|none`。例如：
+`project create` 选项：`--type android|blank`（默认 blank）、`--dir 父目录`（默认 `projects.default_dir`）、`--pkg 包名`、`--lang kotlin|java`（默认 Kotlin）、`--min-sdk N`（默认 24）、`--target-sdk N`（默认 35）、`--compile-sdk N`（默认与 Target 相同）、`--template empty_views|trampoline|none`。SDK 需满足 Min ≤ Target ≤ Compile。例如：
 
     m_s project create MyApp --type android --lang kotlin --pkg com.example.myapp --min-sdk 26 --target-sdk 35
+
+Android 模板默认为 `empty_views`（含 MainActivity 与布局）；`trampoline` 提供桌面入口，不创建应用内界面，预留操作分发代码位置并退出；`none` 仅生成基础工程，没有桌面入口。Java/Kotlin 均支持这三种模板。生成工程自带 Gradle 8.9 Wrapper，首次构建会下载 Gradle；Termux 的 aapt2 路径在构建时自动注入。
 
 ### 文件与 Git
 

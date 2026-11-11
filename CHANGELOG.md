@@ -6,11 +6,13 @@
 ## [Unreleased]
 
 ### Added
+- 完成新建 Android 项目向导与脚手架验收（Issue #17，PR #23）：支持自定义包名、Java/Kotlin、SDK 版本，以及空白界面、无应用内界面的桌面跳板和无 Activity 三种模板；默认最低 SDK 为 API 24，生成工程自带固定为 Gradle 8.9 的 Wrapper。六种语言与模板组合均在 Termux 实际构建并检查 APK 通过。
 - Android 桌面启动器（第一阶段）：提供独立应用图标，通过已授权的 Termux 执行 `m_s open`，启动本地服务并打开系统浏览器；不包含应用内页面，仍依赖 Termux 和 Mobile Studio 源码仓库。
 - 添加 `app` Android 工程及固定为 Gradle 8.9 的 Wrapper，支持在 Mobile Studio 自身项目内构建启动器 APK。
 - 添加受现有本机同源校验保护的 `/api/android/apk` 下载接口，提供当前应用模块的最新 debug APK，支持 HEAD 和范围请求，并补充下载及普通权限安装流程测试。
 
 ### Fixed
+- 新建 Android 项目时拒绝无效语言、模板及 SDK 范围，前端阻止提交不满足 Min ≤ Target ≤ Compile 的配置；转义 Gradle 项目名中的引号及特殊字符。aapt2 路径继续由构建链按设备自动注入，生成工程保持可移植。
 - 普通权限下的安装改为由浏览器 WebUI 下载 APK，再打开下载项确认安装，避免依赖后台 Termux 弹出系统安装器。
 - 普通权限的安装及运行任务明确显示 APK 已就绪、待手动安装，不再将发出安装请求报告为安装成功。
 - 将根目录二进制的忽略规则限定为 `/main`，避免 Android `app/src/main/` 源码被误忽略。
