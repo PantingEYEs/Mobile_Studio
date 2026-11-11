@@ -25,7 +25,7 @@
   let newProjType = 'blank';
   let newProjPkg = '';
   let newProjLang = 'kotlin';
-  let newProjMinSdk = '26';
+  let newProjMinSdk = '24';
   let newProjTargetSdk = '35';
   let newProjCompileSdk = '35';
   let newProjTemplate = 'empty_views';
@@ -220,6 +220,7 @@
 
   async function executeCreateProject() {
     if (!newProjName.trim()) return;
+    if (newProjType === 'android' && (+newProjMinSdk > +newProjTargetSdk || +newProjTargetSdk > +newProjCompileSdk)) return;
     isSubmitting = true;
     try {
       const pkgParam = (newProjPkg.trim() || defaultPkg);
@@ -500,7 +501,7 @@
               <div class="form-item half">
                 <label>最低 SDK (Min)</label>
                 <select bind:value={newProjMinSdk}>
-                  <option value="24">API 24 (Android 7.0)</option>
+                  <option value="24">API 24 (Android 7.0，推荐)</option>
                   <option value="26">API 26 (Android 8.0)</option>
                   <option value="29">API 29 (Android 10)</option>
                   <option value="31">API 31 (Android 12)</option>
@@ -533,6 +534,7 @@
               <label>初始模板 (Activity Template)</label>
               <select bind:value={newProjTemplate}>
                 <option value="empty_views">Empty Views Activity (含 MainActivity 与布局)</option>
+                <option value="trampoline">Trampoline (有桌面入口，无应用内界面)</option>
                 <option value="none">No Activity (仅生成基础骨架)</option>
               </select>
             </div>
@@ -540,7 +542,7 @@
         {/if}
         <div class="modal-buttons">
           <button class="m-btn cancel" on:click={() => (showNewProjModal = false)}>取消</button>
-          <button class="m-btn confirm" on:click={executeCreateProject} disabled={isSubmitting}>
+          <button class="m-btn confirm" on:click={executeCreateProject} disabled={isSubmitting || (newProjType === 'android' && (+newProjMinSdk > +newProjTargetSdk || +newProjTargetSdk > +newProjCompileSdk))}>
             {isSubmitting ? '创建中...' : '确认创建'}
           </button>
         </div>

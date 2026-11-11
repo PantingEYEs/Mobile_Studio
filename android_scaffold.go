@@ -5,6 +5,7 @@ package main
 // 不引入 AndroidX 依赖，以降低移动网络下首次构建需要下载的依赖量。
 
 import (
+	"embed"
 	"fmt"
 	"net/url"
 	"os"
@@ -13,6 +14,9 @@ import (
 	"strings"
 	"text/template"
 )
+
+//go:embed gradlew gradlew.bat gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties
+var scaffoldGradleFiles embed.FS
 
 const (
 	agpVersion    = "8.7.3"
@@ -27,12 +31,18 @@ type androidScaffold struct {
 	MinSdk      int
 	TargetSdk   int
 	CompileSdk  int
-	Template    string // empty_views | none
+	Template    string // empty_views | trampoline | none
 	AgpVersion  string
 	KotlinVer   string
 }
 
-func (s androidScaffold) Kotlin() bool { return s.Lang == "kotlin" }
+func (s androidScaffold) Kotlin() bool     { return s.Lang == "kotlin" }
+func (s androidScaffold) Trampoline() bool { return s.Template == "trampoline" }
+
+// Groovy 单引号字符串不会将项目名中的 $ 当作插值代码。
+func (s androidScaffold) GradleProjectName() string {
+	return "'" + strings.NewReplacer("\\", "\\\\", "'", "\\'", "\r", "\\r", "\n", "\\n", "\t", "\\t").Replace(s.ProjectName) + "'"
+}
 
 var javaKeywords = map[string]bool{
 	"abstract": true, "assert": true, "boolean": true, "break": true, "byte": true, "case": true,
@@ -106,16 +116,22 @@ func newAndroidScaffold(projName string, q url.Values) (*androidScaffold, error)
 	}
 
 	s.Lang = strings.TrimSpace(q.Get("lang"))
-	if s.Lang != "java" {
+	if s.Lang == "" {
 		s.Lang = "kotlin"
 	}
+	if s.Lang != "java" && s.Lang != "kotlin" {
+		return nil, fmt.Errorf("不支持的开发语言: %q（可选 kotlin / java）", s.Lang)
+	}
 	s.Template = strings.TrimSpace(q.Get("template"))
-	if s.Template != "none" {
+	if s.Template == "" {
 		s.Template = "empty_views"
+	}
+	if s.Template != "empty_views" && s.Template != "trampoline" && s.Template != "none" {
+		return nil, fmt.Errorf("不支持的模板: %q（可选 empty_views / trampoline / none）", s.Template)
 	}
 
 	var err error
-	if s.MinSdk, err = sdkParam(q, "minSdk", 26); err != nil {
+	if s.MinSdk, err = sdkParam(q, "minSdk", 24); err != nil {
 		return nil, err
 	}
 	if s.TargetSdk, err = sdkParam(q, "targetSdk", 35); err != nil {
@@ -149,7 +165,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "{{.ProjectName}}"
+rootProject.name = {{.GradleProjectName}}
 include ':app'
 `,
 	"build.gradle": `// Top-level build file
@@ -162,6 +178,7 @@ plugins {
 `,
 	"gradle.properties": `# Gradle 守护进程内存（手机端适当收紧）
 org.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8
+org.gradle.workers.max=2
 android.useAndroidX=true
 android.nonTransitiveRClass=true
 {{- if .Kotlin}}
@@ -246,6 +263,10 @@ var scaffoldManifestWithActivity = `<?xml version="1.0" encoding="utf-8"?>
         android:theme="@style/Theme.App">
         <activity
             android:name=".MainActivity"
+{{- if .Trampoline}}
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+{{- end}}
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -293,8 +314,15 @@ import android.util.Log
 class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+{{- if .Trampoline}}
+        // TODO: 在这里启动目标 Activity、打开链接或分发其他操作。
+        // 不创建应用内界面，操作分发后退出入口 Activity。
+        Log.i("MainActivity", "onCreate: trampoline")
+        finish()
+{{- else}}
         setContentView(R.layout.activity_main)
         Log.i("MainActivity", "onCreate: Hello Mobile Studio!")
+{{- end}}
     }
 }
 `
@@ -309,8 +337,15 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+{{- if .Trampoline}}
+        // TODO: 在这里启动目标 Activity、打开链接或分发其他操作。
+        // 不创建应用内界面，操作分发后退出入口 Activity。
+        Log.i("MainActivity", "onCreate: trampoline");
+        finish();
+{{- else}}
         setContentView(R.layout.activity_main);
         Log.i("MainActivity", "onCreate: Hello Mobile Studio!");
+{{- end}}
     }
 }
 `
@@ -335,6 +370,13 @@ func (s *androidScaffold) files() (map[string]string, error) {
 			return nil, err
 		}
 	}
+	for _, name := range []string{"gradlew", "gradlew.bat", "gradle/wrapper/gradle-wrapper.jar", "gradle/wrapper/gradle-wrapper.properties"} {
+		b, err := scaffoldGradleFiles.ReadFile(name)
+		if err != nil {
+			return nil, fmt.Errorf("读取 Gradle Wrapper 失败 %s: %w", name, err)
+		}
+		out[name] = string(b)
+	}
 
 	srcRoot := "java"
 	if s.Kotlin() {
@@ -342,9 +384,13 @@ func (s *androidScaffold) files() (map[string]string, error) {
 	}
 	pkgDir := strings.ReplaceAll(s.Package, ".", "/")
 
-	if s.Template == "empty_views" {
-		out["app/src/main/AndroidManifest.xml"] = scaffoldManifestWithActivity
-		out["app/src/main/res/layout/activity_main.xml"] = scaffoldLayout
+	if s.Template != "none" {
+		if err := render("app/src/main/AndroidManifest.xml", scaffoldManifestWithActivity); err != nil {
+			return nil, err
+		}
+		if s.Template == "empty_views" {
+			out["app/src/main/res/layout/activity_main.xml"] = scaffoldLayout
+		}
 		if s.Kotlin() {
 			if err := render("app/src/main/"+srcRoot+"/"+pkgDir+"/MainActivity.kt", scaffoldKotlinActivity); err != nil {
 				return nil, err
@@ -372,7 +418,11 @@ func (s *androidScaffold) write(projDir string) error {
 		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
 			return fmt.Errorf("创建目录失败 %s: %v", rel, err)
 		}
-		if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+		mode := os.FileMode(0644)
+		if rel == "gradlew" {
+			mode = 0755
+		}
+		if err := os.WriteFile(full, []byte(content), mode); err != nil {
 			return fmt.Errorf("写入文件失败 %s: %v", rel, err)
 		}
 	}
