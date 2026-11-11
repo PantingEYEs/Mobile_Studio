@@ -3,6 +3,21 @@
 本项目的所有重要变更均记录于此文件。
 格式遵循 Keep a Changelog，并遵守语义化版本。
 
+## [Unreleased]
+
+### Added
+- Android 桌面启动器（第一阶段）：提供独立应用图标，通过已授权的 Termux 执行 `m_s open`，启动本地服务并打开系统浏览器；不包含应用内页面，仍依赖 Termux 和 Mobile Studio 源码仓库。
+- 添加 `app` Android 工程及固定为 Gradle 8.9 的 Wrapper，支持在 Mobile Studio 自身项目内构建启动器 APK。
+- 添加受现有本机同源校验保护的 `/api/android/apk` 下载接口，提供当前应用模块的最新 debug APK，支持 HEAD 和范围请求，并补充下载及普通权限安装流程测试。
+
+### Fixed
+- 普通权限下的安装改为由浏览器 WebUI 下载 APK，再打开下载项确认安装，避免依赖后台 Termux 弹出系统安装器。
+- 普通权限的安装及运行任务明确显示 APK 已就绪、待手动安装，不再将发出安装请求报告为安装成功。
+- 将根目录二进制的忽略规则限定为 `/main`，避免 Android `app/src/main/` 源码被误忽略。
+
+### Known Issues
+- 2026-11-12 实测：当前三星 Android 15 / One UI 7.0 设备仅从 Wi-Fi 切换至移动数据后，Wireless Debugging 断开，`rish` 返回 `Server is not running`，Shizuku 安装和启动通道不可用；再次仅切换网络的尝试也未成功。问题未解决，暂缓处理，未验证 ADB TCP 模式或第三方分支可在本设备规避；详见 [已知问题记录](docs/known-issues.md)。普通权限下仍可在 WebUI 下载安装 APK。
+
 ## [0.0.1-dev] - 2026-11-01
 
 ### Added

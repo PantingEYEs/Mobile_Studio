@@ -78,6 +78,12 @@ Termux 端一次性准备：
 - 无特权下「运行」只完成构建和准备 APK，显示「待手动安装」；CLI 的安装任务返回 `manualInstall=true` 和 `downloadUrl`，不代表安装完成。
 - 运行面板顶部「环境」徽标会列出缺失的依赖及修复命令。
 
+### 已知限制：移动数据下的 Shizuku
+
+在当前三星 Android 15 / One UI 7.0 设备上，已实测仅从 Wi-Fi 切换到移动数据也会出现 Wireless Debugging 断开、`rish` 返回 `Server is not running`，无法继续通过 Shizuku 安装和启动应用。此问题暂缓处理，尚无本机验证有效的规避方案；不能保证提前在 Wi-Fi 下启动 Shizuku 后就能持续使用。
+
+通道失效时仍可构建 APK，并通过 WebUI「下载安装」手动安装。ADB TCP 模式和第三方分支尚未在本机验证。复现过程和后续调查范围见 [已知问题记录](docs/known-issues.md)。
+
 ## 命令行 (m_s)
 
 `m_s` 既是启动器，也是 Mobile Studio 的完整命令行入口。服务生命周期命令由脚本 `scripts/m_s` 处理，其余命令由 Go 二进制通过 HTTP 调用正在运行的本地服务执行（服务未运行时会自动在后台启动，不打开浏览器）。因此 **命令行发起的构建、终端会话等会实时出现在 Web UI 中**，反之亦然；`m_s help` 可随时查看完整用法。
