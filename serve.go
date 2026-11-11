@@ -41,6 +41,7 @@ func serve() int {
 	http.HandleFunc("/api/android/env", handleAndroidEnv)
 	http.HandleFunc("/api/android/build", handleAndroidBuild)
 	http.HandleFunc("/api/android/install", handleAndroidInstall)
+	http.HandleFunc("/api/android/apk", handleAndroidAPK)
 	http.HandleFunc("/api/android/launch", handleAndroidLaunch)
 	http.HandleFunc("/api/android/run", handleAndroidRun)
 	http.HandleFunc("/api/android/stop", handleAndroidStop)

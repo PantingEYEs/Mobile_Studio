@@ -2,7 +2,7 @@
 bin/
 *.exe
 *.out
-main
+/main
 
 # OS & IDE
 .DS_Store
@@ -15,3 +15,9 @@ build/
 .svelte-kit/
 *.log
 dist/
+
+# Android launcher
+.gradle/
+local.properties
+*.iml
+.android-tools/

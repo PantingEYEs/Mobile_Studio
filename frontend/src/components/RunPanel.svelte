@@ -42,6 +42,8 @@
   $: logRunning = logTask && logTask.status === 'running';
   $: isAndroid = env && env.project && env.project.isAndroid && env.project.appModule;
   $: blocking = env ? env.problems : [];
+  $: apkURL = currentProject ? `/api/android/apk?root=${encodeURIComponent(currentProject.path)}` : '';
+  $: manualInstall = pipeTask?.status === 'success' && pipeTask?.result?.manualInstall;
 
   $: filteredLogs = filterLogs(logLines, logLevel, logFilter);
 
@@ -239,6 +241,9 @@
     activeTab = 'build';
     callTask('install', false);
   }
+  function downloadAPK() {
+    actionMsg = '下载完成后，点击浏览器中的下载项打开 APK 并确认安装；首次需要允许浏览器安装未知应用。安装完成后可在安装器中点击「打开」。';
+  }
   function launch() {
     activeTab = 'build';
     callTask('launch');
@@ -377,13 +382,22 @@
         <div class="actions">
           <button class="act primary" disabled={pipeRunning} on:click={runPipeline}>▶ 运行</button>
           <button class="act" disabled={pipeRunning} on:click={build}>🔨 构建</button>
-          <button class="act" disabled={pipeRunning} on:click={install}>📲 安装</button>
+          {#if privileged}
+            <button class="act" disabled={pipeRunning} on:click={install}>📲 安装</button>
+          {:else if !pipeRunning}
+            <a class="act" href={apkURL} download on:click={downloadAPK}>📲 下载安装</a>
+          {:else}
+            <button class="act" disabled>📲 下载安装</button>
+          {/if}
           <button class="act" disabled={pipeRunning} on:click={launch}>🚀 启动</button>
           <button class="act danger" disabled={!privileged} on:click={stopApp}>■ 停止</button>
           {#if pipeRunning}
             <button class="act danger" on:click={() => cancelTask(pipeTask)}>取消{kindLabel[pipeTask.kind]}</button>
           {/if}
         </div>
+        {#if !privileged}
+          <div class="action-msg">下载后从浏览器打开 APK，确认安装后点击「打开」。启用 Shizuku / ADB 后可直接安装和启动。</div>
+        {/if}
       {/if}
 
       {#if actionMsg}
@@ -394,7 +408,7 @@
     <div class="tabs">
       <button class="tab {activeTab === 'build' ? 'on' : ''}" on:click={() => (activeTab = 'build')}>
         构建输出
-        {#if pipeTask}<span class="st {pipeTask.status}">{kindLabel[pipeTask.kind]}{statusLabel[pipeTask.status]}</span>{/if}
+        {#if pipeTask}<span class="st {manualInstall ? 'waiting' : pipeTask.status}">{manualInstall ? 'APK 已就绪 · 待手动安装' : kindLabel[pipeTask.kind] + statusLabel[pipeTask.status]}</span>{/if}
       </button>
       <button class="tab {activeTab === 'logcat' ? 'on' : ''}" on:click={() => (activeTab = 'logcat')}>
         Logcat
@@ -559,6 +573,7 @@
   .act.primary { background: #166534; border-color: #22c55e; color: #f0fdf4; }
   .act.danger { color: #fca5a5; }
   .act:disabled { opacity: 0.4; cursor: default; }
+  a.act { text-decoration: none; }
 
   .action-msg { font-size: 11px; color: #fbbf24; word-break: break-all; }
 
@@ -582,6 +597,7 @@
   .st.success { color: #86efac; }
   .st.failed { color: #f87171; }
   .st.stopped { color: #94a3b8; }
+  .st.waiting { color: #fbbf24; }
 
   .log-tools { display: flex; gap: 6px; align-items: center; }
   .log-tools select, .log-tools input[type='text'] {

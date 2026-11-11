@@ -30,6 +30,10 @@
 
 ## 快速使用
 
+### Android 桌面启动器（第一阶段）
+
+项目根目录包含 `app` Android 应用模块，可在 Mobile Studio 自身项目的运行面板中构建 APK。点击应用图标会通过 Termux 启动服务并打开系统浏览器，无应用内页面。首次授权、环境准备与构建步骤见 [Android 启动器说明](docs/android-launcher.md)。
+
 ### 启动服务并打开预设浏览器
 在 Termux 终端任意目录下执行：
 
@@ -70,7 +74,8 @@ Termux 端一次性准备：
     ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;34.0.0"
 
 - aarch64 下的 aapt2 覆盖在构建时以 `-Pandroid.aapt2FromMavenOverride` 注入，不写入项目文件，项目在 PC / Android Studio 上可直接打开构建。
-- 设备通道按 Shizuku (`rish`) → 无线调试 (`adb`) → 无特权 的顺序自动选择。无特权时安装会跳转系统安装器、无法强停与读取应用日志。
+- 设备通道按 Shizuku (`rish`) → 无线调试 (`adb`) → 无特权 的顺序自动选择。无特权时在 WebUI 点击「下载安装」，由浏览器下载 APK，打开下载项后确认安装；首次需允许浏览器安装未知应用，安装后可在安装器中点击「打开」。无需切换到 Termux；无法强停与读取应用日志。
+- 无特权下「运行」只完成构建和准备 APK，显示「待手动安装」；CLI 的安装任务返回 `manualInstall=true` 和 `downloadUrl`，不代表安装完成。
 - 运行面板顶部「环境」徽标会列出缺失的依赖及修复命令。
 
 ## 命令行 (m_s)

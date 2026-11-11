@@ -244,16 +244,13 @@ func doInstall(ctx context.Context, t *Task, root, apk string, sh DeviceShell) e
 		return fmt.Errorf("adb 安装失败: %v", err)
 
 	default:
-		// 无特权：交给系统安装器，需要用户手动确认
-		if _, err := exec.LookPath("termux-open"); err != nil {
-			return errors.New("无特权通道且未找到 termux-open，无法安装。请启用 Shizuku 或无线调试")
-		}
-		t.Log("$ termux-open --content-type application/vnd.android.package-archive %s", apk)
-		if _, err := runStreaming(ctx, t, exec.CommandContext(ctx, "termux-open", "--content-type", "application/vnd.android.package-archive", apk), StreamOpts{}); err != nil {
-			return fmt.Errorf("调起系统安装器失败: %v", err)
-		}
-		t.Log("✓ 已调起系统安装器，请在弹窗中确认安装（首次需允许 Termux 安装未知应用）")
+		// 用户位于浏览器时不能依赖后台 Termux 弹出安装器。
+		// 仅准备下载入口，不声称应用已安装或安装器已经显示。
 		t.SetResult("manualInstall", true)
+		t.SetResult("downloadUrl", apkDownloadURL(root))
+		t.Log("· APK 已就绪，等待用户手动安装")
+		t.Log("· 请在 WebUI 点击「下载安装」，下载后打开 APK 并确认安装（首次需允许浏览器安装未知应用）")
+		t.Log("· 下载地址: %s", apkDownloadURL(root))
 		return nil
 	}
 }
@@ -516,7 +513,7 @@ func handleAndroidRun(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if !p.sh.Privileged() {
-			t.Log("· 无特权模式：请在系统安装器完成安装后，再点击「启动」")
+			t.Log("· 无特权模式：下载并手动安装后，可在安装器中点击「打开」")
 			return nil
 		}
 		return doLaunch(ctx, t, p.root, p.pkg, p.sh)

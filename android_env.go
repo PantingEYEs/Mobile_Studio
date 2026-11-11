@@ -267,7 +267,7 @@ func quickOutput(timeout time.Duration, name string, args ...string) string {
 // DeviceShell 描述执行 pm/am/logcat 所用的通道。
 //   - rish:  Shizuku 提供的 shell 身份 (uid 2000)，可静默安装、强停、读取全量 logcat
 //   - adb:   本机无线调试 (adb connect 127.0.0.1:port) 后的 adb shell，能力同上
-//   - local: 仅 Termux 应用自身权限，只能通过系统安装器安装、Termux am 启动，无法读取他人日志
+//   - local: WebUI 下载 APK 后手动安装；Termux am 尝试普通启动，无法读取他人日志
 type DeviceShell struct {
 	Mode   string `json:"mode"`
 	Serial string `json:"serial,omitempty"`
@@ -381,7 +381,7 @@ func detectDeviceShell(prefer string, refresh bool) DeviceShell {
 			}
 			notes = append(notes, msg)
 		}
-		return DeviceShell{Mode: "local", Detail: "无特权通道（" + strings.Join(notes, "；") + "），仅支持系统安装器安装与普通启动"}
+		return DeviceShell{Mode: "local", Detail: "无特权通道（" + strings.Join(notes, "；") + "），需在浏览器下载 APK 后手动安装"}
 	}
 	d := pick()
 	if prefer == "local" {
@@ -514,7 +514,7 @@ func buildEnvReport(root string, refreshShell bool) EnvReport {
 		rep.Problems = append(rep.Problems, "Termux 下需要原生 aapt2（Maven 版仅支持 x86_64）：请执行 pkg install aapt2")
 	}
 	if !rep.Shell.Privileged() {
-		rep.Hints = append(rep.Hints, "未检测到 Shizuku/adb：安装将跳转系统安装器手动确认，且无法强制停止应用与读取应用日志。启动 Shizuku 并导出 rish 到 PATH 即可解锁完整能力")
+		rep.Hints = append(rep.Hints, "未检测到 Shizuku/adb：请点击「下载安装」，下载后从浏览器打开 APK 并确认安装；无法强制停止应用与读取应用日志。启用 Shizuku/rish 或无线调试后可直接安装和启动")
 	}
 	if rep.Termux {
 		rep.Hints = append(rep.Hints, "Android 12+ 的幻影进程限制可能杀死 Gradle 守护进程。可通过 Shizuku 执行：device_config put activity_manager max_phantom_processes 2147483647")
