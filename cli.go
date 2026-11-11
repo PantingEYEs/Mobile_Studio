@@ -606,7 +606,7 @@ func cmdProject(c *cliCtx) int {
 	case "create", "new":
 		name := c.arg(1)
 		if name == "" {
-			return c.fail(usageError{"用法: m_s project create <名称> [--type android|blank] [--dir 父目录] [--pkg 包名] [--lang kotlin|java] [--min-sdk N] [--target-sdk N] [--compile-sdk N] [--template empty_views|none]"})
+			return c.fail(usageError{"用法: m_s project create <名称> [--type android|blank] [--dir 父目录] [--pkg 包名] [--lang kotlin|java] [--min-sdk N] [--target-sdk N] [--compile-sdk N] [--template empty_views|trampoline|none]"})
 		}
 		dir := c.flag("dir")
 		if dir != "" {
@@ -1018,7 +1018,7 @@ const cliHelp = `Mobile Studio 命令行 (m_s)
   m_s project current         显示当前目录对应的项目
   m_s project create <名称> [--type android|blank] [--dir 父目录]
         [--pkg 包名] [--lang kotlin|java] [--min-sdk N] [--target-sdk N]
-        [--compile-sdk N] [--template empty_views|none]
+        [--compile-sdk N] [--template empty_views|trampoline|none]
   m_s project import <目录>   登记已有目录
   m_s project clone <地址> [--dir 父目录]
   m_s project remove <名称|路径>  移出列表（不删除文件）
