@@ -27,7 +27,7 @@ var configKeys = []configKey{
 	{"server.port", "int", 8080, nil, "Web 服务监听端口（127.0.0.1），修改后需 m_s restart"},
 	{"server.open_browser", "bool", true, nil, "执行 m_s / m_s start 时是否自动打开浏览器"},
 	{"projects.default_dir", "string", "~", nil, "新建 / 克隆项目时的默认父目录"},
-	{"android.sdk_dir", "string", "", nil, "Android SDK 路径；留空自动探测（local.properties → ANDROID_HOME → 常见位置）"},
+	{"android.sdk_dir", "string", "", nil, "共享 Android SDK 路径；留空自动探测（项目 local.properties → 环境变量 → Mobile Studio SDK → 常见位置）"},
 	{"android.java_home", "string", "", nil, "JDK 目录；留空使用 JAVA_HOME 或 PATH 中的 java"},
 	{"android.gradle", "string", "", nil, "Gradle 可执行文件；留空时优先项目 gradlew，其次 PATH 中的 gradle"},
 	{"android.gradle_args", "string", "", nil, "附加给 Gradle 的参数，如 \"--offline --no-daemon\""},

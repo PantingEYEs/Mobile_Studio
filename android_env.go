@@ -137,22 +137,41 @@ func looksLikeSdk(p string) bool {
 	return false
 }
 
-// detectSdk 依次检查：项目 local.properties → ANDROID_HOME → ANDROID_SDK_ROOT → 常见安装位置。
+// projectSdkPath 按所属项目解析 local.properties 中的相对 SDK 路径。
+func projectSdkPath(root string) string {
+	if root == "" {
+		return ""
+	}
+	p := expandHome(strings.TrimSpace(readProperties(filepath.Join(root, "local.properties"))["sdk.dir"]))
+	if p != "" && !filepath.IsAbs(p) {
+		p = filepath.Join(root, p)
+	}
+	return p
+}
+
+// detectSdk 为环境检查、新建项目和构建提供统一的 SDK 选择。
+// 显式配置优先；未配置的项目自动复用 Mobile Studio 的 SDK。
 func detectSdk(projectRoot string) *SdkInfo {
+	return detectSdkAt(projectRoot, selfRoot())
+}
+
+func detectSdkAt(projectRoot, studioRoot string) *SdkInfo {
 	type cand struct{ path, source string }
 	var cands []cand
 	if v := cfgString("android.sdk_dir"); v != "" {
 		cands = append(cands, cand{v, "config"})
 	}
-	if projectRoot != "" {
-		if v := readProperties(filepath.Join(projectRoot, "local.properties"))["sdk.dir"]; v != "" {
-			cands = append(cands, cand{v, "local.properties"})
-		}
-	}
+	cands = append(cands, cand{projectSdkPath(projectRoot), "local.properties"})
 	cands = append(cands,
 		cand{os.Getenv("ANDROID_HOME"), "ANDROID_HOME"},
 		cand{os.Getenv("ANDROID_SDK_ROOT"), "ANDROID_SDK_ROOT"},
 	)
+	if studioRoot != "" {
+		cands = append(cands,
+			cand{projectSdkPath(studioRoot), "Mobile Studio local.properties"},
+			cand{filepath.Join(studioRoot, ".android-tools", "sdk"), "Mobile Studio 共享 SDK"},
+		)
+	}
 	home, _ := os.UserHomeDir()
 	for _, p := range []string{
 		filepath.Join(home, "android-sdk"),
@@ -166,6 +185,13 @@ func detectSdk(projectRoot string) *SdkInfo {
 	}
 	for _, c := range cands {
 		p := expandHome(strings.TrimSpace(c.path))
+		if p == "" {
+			continue
+		}
+		p, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
 		if looksLikeSdk(p) {
 			return &SdkInfo{
 				Path:       p,
@@ -493,7 +519,7 @@ func buildEnvReport(root string, refreshShell bool) EnvReport {
 		rep.Problems = append(rep.Problems, "未找到 Gradle：请执行 pkg install gradle，或在项目中放置 gradlew")
 	}
 	if rep.Sdk == nil {
-		rep.Problems = append(rep.Problems, "未找到 Android SDK：请设置 ANDROID_HOME，或安装至 ~/android-sdk（需包含 platforms/android-XX 与 build-tools）")
+		rep.Problems = append(rep.Problems, "未找到 Android SDK：请通过 m_s config set android.sdk_dir <SDK目录> 配置共享 SDK，或安装至 Mobile Studio 的 .android-tools/sdk、~/android-sdk（需包含 platforms/android-XX 与 build-tools）")
 	} else {
 		if len(rep.Sdk.BuildTools) == 0 {
 			rep.Hints = append(rep.Hints, "SDK 中尚无 build-tools：AGP 8.7 默认使用 34.0.0，首次构建会自动下载（需已执行 sdkmanager --licenses），也可手动执行 sdkmanager \"build-tools;34.0.0\"")

@@ -74,6 +74,7 @@ Termux 端一次性准备：
     ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;34.0.0"
 
 - aarch64 下的 aapt2 覆盖在构建时以 `-Pandroid.aapt2FromMavenOverride` 注入，不写入项目文件，项目在 PC / Android Studio 上可直接打开构建。
+- SDK 跨项目自动复用：依次检查全局 `android.sdk_dir`、目标项目 `local.properties`、`ANDROID_HOME` / `ANDROID_SDK_ROOT`、Mobile Studio 自身的 `local.properties`、Mobile Studio 的 `.android-tools/sdk`，最后检查常见安装位置。无效路径会继续回退；相对的 `sdk.dir` 按所属项目目录解析。新建、导入项目的环境检查及构建均使用此规则，无需逐项目配置共享 SDK。自定义安装位置可一次执行 `m_s config set android.sdk_dir /绝对路径/SDK`；此配置不负责安装缺失的 SDK 平台或 JDK。
 - 设备通道按 Shizuku (`rish`) → 无线调试 (`adb`) → 无特权 的顺序自动选择。无特权时在 WebUI 点击「下载安装」，由浏览器下载 APK，打开下载项后确认安装；首次需允许浏览器安装未知应用，安装后可在安装器中点击「打开」。无需切换到 Termux；无法强停与读取应用日志。
 - 无特权下「运行」只完成构建和准备 APK，显示「待手动安装」；CLI 的安装任务返回 `manualInstall=true` 和 `downloadUrl`，不代表安装完成。
 - 运行面板顶部「环境」徽标会列出缺失的依赖及修复命令。

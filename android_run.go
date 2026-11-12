@@ -26,8 +26,7 @@ var pkgNameRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_
 
 func ensureLocalProperties(t *Task, root, sdkPath string) {
 	lp := filepath.Join(root, "local.properties")
-	props := readProperties(lp)
-	if v := props["sdk.dir"]; v != "" && looksLikeSdk(expandHome(v)) {
+	if looksLikeSdk(projectSdkPath(root)) {
 		return
 	}
 	b, _ := os.ReadFile(lp)
